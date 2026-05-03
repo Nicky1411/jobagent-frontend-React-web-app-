@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const BACKEND_URL = "http://localhost:5000";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA ────────────────────────────────────────────
@@ -122,6 +122,7 @@ export default function App() {
   const [resumeFilename, setResumeFilename] = useState("");
   const [parsedProfile, setParsedProfile] = useState(null);
   const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
 
   // Jobs
   const [jobs, setJobs] = useState(DEMO_JOBS);
@@ -159,46 +160,42 @@ export default function App() {
 
   // ── Parse Profile ────────────────────────────────────
   const parseProfile = async () => {
+    if (!resumeRaw || resumeRaw.trim().length < 20) {
+      alert("Please paste your resume text or upload a text/doc file first.");
+      return;
+    }
     setParsing(true);
+    setParseError("");
     try {
       const raw = await claude(
-        `Parse this resume/profile. Return ONLY valid JSON (no markdown):
+        `Parse this resume/profile. Return ONLY valid JSON (no markdown, no extra text):
 {
-  "name": string,
-  "email": string,
-  "phone": string,
-  "title": string,
-  "summary": string (2-3 sentences),
+  "name": "string",
+  "email": "string",
+  "phone": "string",
+  "title": "string",
+  "summary": "string (2-3 sentences)",
   "experience_years": number,
-  "skills": string[],
-  "experience": [{"company": string, "role": string, "duration": string, "bullets": string[]}],
-  "education": string,
-  "certifications": string[],
-  "languages": string[]
+  "skills": ["string"],
+  "experience": [{"company": "string", "role": "string", "duration": "string", "bullets": ["string"]}],
+  "education": "string",
+  "certifications": ["string"],
+  "languages": ["string"]
 }
 
-Resume/Profile text:
-"${resumeRaw || `Anita Sharma, Senior Support Engineer – Data Products. 6+ years experience supporting Cloudera CDH/CDP, Hadoop, Spark, Hive, HDFS, HBase, Kafka. Worked at Tata Consultancy Services and Infosys. B.Tech Computer Science, BITS Pilani 2017. Cloudera CCA Spark & Hadoop Developer certified. Led 24x7 support for enterprise Hadoop clusters of 200+ nodes. Proficient in Linux, Python scripting, Cloudera Manager, incident management.`}"`,
-        "Return ONLY valid JSON. No markdown, no explanation, no preamble."
+Resume text to parse:
+"""
+${resumeRaw.slice(0, 4000)}
+"""`,
+        "You are a resume parser. Return ONLY valid JSON matching the schema exactly. No markdown, no explanation, no preamble."
       );
       const cleaned = raw.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleaned);
+      if (!parsed.name) throw new Error("Could not extract name from resume");
       setParsedProfile(parsed);
-      setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "cloudera hadoop"} support engineer europe english`);
-    } catch {
-      setParsedProfile({
-        name: "Anita Sharma", email: "anita@email.com", phone: "+91-XXXXXXXXXX",
-        title: "Senior Support Engineer – Data Products", experience_years: 6,
-        summary: "Experienced Senior Support Engineer with 6+ years managing enterprise-scale Cloudera and Hadoop data platforms. Proven track record in incident management, cluster administration, and cross-functional collaboration in global teams.",
-        skills: ["Cloudera CDH", "CDP", "Hadoop", "Spark", "Hive", "HDFS", "HBase", "Kafka", "Linux", "Python", "SQL", "Cloudera Manager"],
-        experience: [
-          { company: "Tata Consultancy Services", role: "Senior Support Engineer", duration: "2020–Present", bullets: ["Managed 200+ node CDH clusters for Fortune 500 clients", "Led 24x7 on-call support for critical Hadoop infrastructure", "Reduced MTTR by 40% through proactive monitoring with Cloudera Manager"] },
-          { company: "Infosys", role: "Support Engineer", duration: "2017–2020", bullets: ["Administered Hadoop clusters and Hive/Spark workloads", "Automated routine DBA tasks via Python scripts", "Supported HBase and Kafka pipelines for real-time analytics"] },
-        ],
-        education: "B.Tech Computer Science, BITS Pilani, 2017",
-        certifications: ["Cloudera CCA Spark & Hadoop Developer"],
-        languages: ["English", "Hindi"],
-      });
+      setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "support engineer"} support engineer europe english`);
+    } catch (e) {
+      setParseError(`Could not parse resume: ${e.message}. Please paste the resume as plain text below.`);
     }
     setParsing(false);
   };
@@ -585,23 +582,28 @@ Packer.toBuffer(doc).then(buf => {
             {tab === "Profile" && (
               <div className="fade" style={{ maxWidth: 680 }}>
                 <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>Resume & Profile</h2>
-                <p style={{ color: C.muted, fontSize: 13, marginBottom: 22 }}>Upload your wife's resume once. The agent rewrites it entirely for each job.</p>
+                <p style={{ color: C.muted, fontSize: 13, marginBottom: 16 }}>Paste her resume text below — the AI will extract all details automatically.</p>
 
-                <div onClick={() => fileRef.current.click()} style={{ border: `2px dashed ${C.border}`, borderRadius: 12, padding: "32px 24px", textAlign: "center", cursor: "pointer", background: C.card, marginBottom: 16 }}>
-                  <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" style={{ display: "none" }}
-                    onChange={e => { const f = e.target.files[0]; if (!f) return; setResumeFilename(f.name); const r = new FileReader(); r.onload = ev => setResumeRaw(ev.target.result); r.readAsText(f); }} />
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>{resumeFilename ? "📄" : "⬆️"}</div>
-                  <div style={{ fontWeight: 700, color: resumeFilename ? C.green : C.text }}>{resumeFilename || "Click to upload resume"}</div>
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>PDF, DOC, DOCX, TXT</div>
+                <div style={{ background: C.yellow + "15", border: `1px solid ${C.yellow}40`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: C.yellow }}>
+                  💡 <strong>How to paste:</strong> Open her resume (PDF/Word) → Select All (Ctrl+A) → Copy (Ctrl+C) → Paste below (Ctrl+V)
                 </div>
 
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Or paste resume / describe profile:</div>
-                  <textarea value={resumeRaw} onChange={e => setResumeRaw(e.target.value)} rows={6} placeholder="e.g. Senior Support Engineer 6+ years Cloudera CDH CDP Hadoop Spark Hive Kafka. Worked at TCS. B.Tech CS BITS Pilani..." style={{ width: "100%", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", color: C.text, fontSize: 13, resize: "vertical", lineHeight: 1.7 }} />
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Resume text: <span style={{ color: C.accent }}>paste here</span></div>
+                  <textarea value={resumeRaw} onChange={e => { setResumeRaw(e.target.value); setParseError(""); }} rows={10}
+                    placeholder="Paste her full resume here — name, email, phone, work experience, skills, education, certifications..."
+                    style={{ width: "100%", background: C.card, border: `1px solid ${resumeRaw.length > 50 ? C.green + "60" : C.border}`, borderRadius: 10, padding: "12px 14px", color: C.text, fontSize: 13, resize: "vertical", lineHeight: 1.7 }} />
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{resumeRaw.length} characters {resumeRaw.length > 100 ? "✓ ready to parse" : "— paste more content"}</div>
                 </div>
 
-                <Btn onClick={parseProfile} disabled={parsing || (!resumeFilename && !resumeRaw)} color={C.accent}>
-                  {parsing ? <><span className="spin">⟳</span> Parsing…</> : "⚡ Parse with AI"}
+                {parseError && (
+                  <div style={{ background: C.red + "15", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.red }}>
+                    ❌ {parseError}
+                  </div>
+                )}
+
+                <Btn onClick={parseProfile} disabled={parsing || !resumeRaw || resumeRaw.trim().length < 50} color={C.accent}>
+                  {parsing ? <><span className="spin">⟳</span> Parsing with AI…</> : "⚡ Parse Resume with AI"}
                 </Btn>
 
                 {parsedProfile && (
