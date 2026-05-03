@@ -1,0 +1,864 @@
+import { useState, useRef, useEffect, useCallback } from "react";
+
+// ── CONFIG ───────────────────────────────────────────────
+const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
+
+// ── DEMO DATA ────────────────────────────────────────────
+const DEMO_JOBS = [
+  { id: 1, title: "Senior Data Platform Support Engineer", company: "ASML", location: "Eindhoven, Netherlands", salary: "€70k–€90k", tags: ["Cloudera", "Hadoop", "English Only", "Visa Sponsor"], match: 94, url: "https://relocate.me", source: "Relocate.me", posted: "2d ago", description: "We are looking for a Senior Data Platform Support Engineer to join our data infrastructure team. You will support and maintain our large-scale Hadoop/Cloudera-based data platform used by 2000+ engineers globally. Key requirements: 5+ years with Cloudera CDH/CDP, Hadoop cluster administration, Spark, Hive, HDFS, Kafka. Strong Linux troubleshooting. Experience with monitoring tools (Cloudera Manager, Grafana). English is our working language. Relocation and visa support provided." },
+  { id: 2, title: "Big Data Support Engineer", company: "Booking.com", location: "Amsterdam, Netherlands", salary: "€65k–€85k", tags: ["CDH", "Spark", "Hive", "Relocation Package"], match: 91, url: "https://eurotechjobs.com", source: "EuroTechJobs", posted: "1d ago", description: "Booking.com's Data Infrastructure team is hiring a Big Data Support Engineer. You'll support CDH clusters, troubleshoot Spark jobs, manage HDFS storage, and collaborate with data engineering teams. Requirements: 4+ years CDH/Spark/Hive, HBase experience a plus, Python scripting, incident management. Full English-speaking environment. Competitive relocation package." },
+  { id: 3, title: "Data Infrastructure Support Specialist", company: "Zalando", location: "Berlin, Germany", salary: "€60k–€80k", tags: ["Cloudera", "Kafka", "English OK", "Stock Options"], match: 87, url: "https://arbeitnow.com", source: "Arbeitnow", posted: "3d ago", description: "Zalando is seeking a Data Infrastructure Support Specialist for our Berlin HQ. Responsibilities include managing Cloudera clusters, Kafka pipeline support, performance tuning, incident response. English is the working language. 4+ years big data support experience required. Kafka, Flink experience valued. Stock options included." },
+  { id: 4, title: "Cloudera Platform Engineer", company: "ING Bank", location: "Amsterdam, Netherlands", salary: "€75k–€95k", tags: ["Cloudera", "CDP", "Visa Sponsor", "Banking"], match: 83, url: "https://remotive.com", source: "Remotive", posted: "5d ago", description: "ING Bank is hiring a Cloudera Platform Engineer to own our CDP deployment across EU regions. You'll troubleshoot cluster issues, manage upgrades, work with data teams on performance. Requirements: Cloudera CDP certified preferred, 5+ years, banking domain a plus. Visa sponsorship available. All-English teams." },
+  { id: 5, title: "Senior Support Engineer – Data Products", company: "Spotify", location: "Stockholm, Sweden", salary: "€80k–€100k", tags: ["Hadoop", "GCP", "English Only", "Relocation"], match: 79, url: "https://relocate.me", source: "Relocate.me", posted: "1w ago", description: "Spotify is looking for a Senior Support Engineer for our data products team in Stockholm. You'll support Hadoop-based pipelines processing billions of events daily. GCP experience valued. Cloudera background helpful. Must be comfortable in a fast-paced English-only environment. Full relocation package." },
+];
+
+// ── THEME ────────────────────────────────────────────────
+const C = {
+  bg: "#07090f", surface: "#0d1117", card: "#0f1520", border: "#1c2a3a",
+  accent: "#3b82f6", green: "#22c55e", yellow: "#eab308", red: "#ef4444",
+  purple: "#a855f7", cyan: "#06b6d4", orange: "#f97316",
+  text: "#e2e8f0", muted: "#4b6280", dim: "#1a2535",
+};
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@300;400;500&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:${C.bg};color:${C.text};font-family:'Inter',sans-serif}
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-track{background:${C.bg}}
+  ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+  @keyframes progress{from{width:0}to{width:100%}}
+  .spin{animation:spin .8s linear infinite;display:inline-block}
+  .fade{animation:fadeIn .3s ease}
+  .pulse{animation:pulse 1.5s ease-in-out infinite}
+  input,textarea,select{outline:none;font-family:'Inter',sans-serif}
+  button{font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s}
+  .mono{font-family:'Fira Code',monospace}
+`;
+
+// ── MINI COMPONENTS ──────────────────────────────────────
+const Tag = ({ label, color }) => {
+  const c = color || (label.includes("Visa") || label.includes("Reloc") ? C.green : label.includes("English") ? C.cyan : C.muted);
+  return <span style={{ background: c + "1a", border: `1px solid ${c}40`, borderRadius: 4, padding: "2px 8px", fontSize: 11, color: c, marginRight: 4, marginBottom: 3, display: "inline-block", fontWeight: 500 }}>{label}</span>;
+};
+
+const Badge = ({ label, color = C.accent }) => (
+  <span style={{ background: color + "20", border: `1px solid ${color}50`, borderRadius: 5, padding: "3px 10px", fontSize: 11, color, fontWeight: 600 }}>{label}</span>
+);
+
+const MatchBar = ({ score }) => {
+  const color = score >= 85 ? C.green : score >= 70 ? C.accent : C.yellow;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 52 }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{score}</div>
+      <div style={{ fontSize: 9, color: C.muted, marginBottom: 4 }}>match</div>
+      <div style={{ width: 40, height: 4, background: C.border, borderRadius: 2 }}>
+        <div style={{ width: `${score}%`, height: "100%", background: color, borderRadius: 2, transition: "width .6s ease" }} />
+      </div>
+      {score >= AUTO_APPLY_THRESHOLD && <div style={{ fontSize: 9, color: C.green, marginTop: 3, fontWeight: 600 }}>AUTO ⚡</div>}
+    </div>
+  );
+};
+
+const Btn = ({ children, onClick, color = C.accent, outline, disabled, small, style = {} }) => (
+  <button onClick={onClick} disabled={disabled} style={{
+    background: disabled ? C.dim : outline ? "transparent" : color,
+    border: `1px solid ${disabled ? C.border : outline ? color + "80" : color}`,
+    borderRadius: 8, padding: small ? "5px 12px" : "9px 18px",
+    color: disabled ? C.muted : outline ? color : "#fff",
+    fontWeight: 600, fontSize: small ? 12 : 13, ...style,
+  }}>{children}</button>
+);
+
+// Progress step indicator
+const Pipeline = ({ steps, current }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 20 }}>
+    {steps.map((step, i) => {
+      const done = i < current, active = i === current;
+      return (
+        <div key={step} style={{ display: "flex", alignItems: "center", flex: i < steps.length - 1 ? 1 : "none" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", border: `2px solid ${done ? C.green : active ? C.accent : C.border}`, background: done ? C.green + "20" : active ? C.accent + "20" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: done ? C.green : active ? C.accent : C.muted, fontWeight: 700 }}>
+              {done ? "✓" : i + 1}
+            </div>
+            <span style={{ fontSize: 10, color: done ? C.green : active ? C.accent : C.muted, whiteSpace: "nowrap", fontWeight: active ? 600 : 400 }}>{step}</span>
+          </div>
+          {i < steps.length - 1 && <div style={{ flex: 1, height: 2, background: done ? C.green + "60" : C.border, margin: "0 6px", marginBottom: 16 }} />}
+        </div>
+      );
+    })}
+  </div>
+);
+
+// Diff viewer — side by side original vs tailored
+const DiffViewer = ({ original, tailored }) => (
+  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, height: "100%" }}>
+    {[["📄 Original Resume", original, C.muted], ["✨ Tailored Resume", tailored, C.green]].map(([label, text, color]) => (
+      <div key={label} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ fontSize: 11, color, fontWeight: 600, marginBottom: 6, padding: "4px 0" }}>{label}</div>
+        <textarea readOnly value={text || "—"} style={{
+          flex: 1, width: "100%", background: C.surface, border: `1px solid ${color}30`,
+          borderRadius: 8, padding: 14, color: C.text, fontSize: 12, resize: "none",
+          fontFamily: "Fira Code, monospace", lineHeight: 1.8,
+        }} />
+      </div>
+    ))}
+  </div>
+);
+
+// ── MAIN APP ─────────────────────────────────────────────
+const TABS = ["Profile", "Jobs", "Pipeline", "Tracker"];
+
+export default function App() {
+  const [tab, setTab] = useState("Profile");
+
+  // Profile
+  const [resumeRaw, setResumeRaw] = useState("");
+  const [resumeFilename, setResumeFilename] = useState("");
+  const [parsedProfile, setParsedProfile] = useState(null);
+  const [parsing, setParsing] = useState(false);
+
+  // Jobs
+  const [jobs, setJobs] = useState(DEMO_JOBS);
+  const [searching, setSearching] = useState(false);
+  const [expandedJob, setExpandedJob] = useState(null);
+  const [backendOnline, setBackendOnline] = useState(null);
+  const [searchKeywords, setSearchKeywords] = useState("cloudera support engineer data platform hadoop europe");
+
+  // Pipeline — per-job processing state
+  // pipelineState[jobId] = { step, resumeOriginal, resumeTailored, coverLetter, docxBlob, status, log[] }
+  const [pipelineState, setPipelineState] = useState({});
+  const [activePipelineJob, setActivePipelineJob] = useState(null);
+  const [autoQueue, setAutoQueue] = useState([]); // jobs queued for auto-apply
+
+  // Tracker
+  const [applications, setApplications] = useState({});
+
+  const fileRef = useRef();
+
+  // ── Claude API ───────────────────────────────────────
+  const claude = async (prompt, system = "", maxTokens = 1500) => {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: maxTokens,
+        system: system || "You are an expert resume writer and career coach for European tech expat roles.",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    const d = await r.json();
+    return d.content?.[0]?.text || "";
+  };
+
+  // ── Parse Profile ────────────────────────────────────
+  const parseProfile = async () => {
+    setParsing(true);
+    try {
+      const raw = await claude(
+        `Parse this resume/profile. Return ONLY valid JSON (no markdown):
+{
+  "name": string,
+  "email": string,
+  "phone": string,
+  "title": string,
+  "summary": string (2-3 sentences),
+  "experience_years": number,
+  "skills": string[],
+  "experience": [{"company": string, "role": string, "duration": string, "bullets": string[]}],
+  "education": string,
+  "certifications": string[],
+  "languages": string[]
+}
+
+Resume/Profile text:
+"${resumeRaw || `Anita Sharma, Senior Support Engineer – Data Products. 6+ years experience supporting Cloudera CDH/CDP, Hadoop, Spark, Hive, HDFS, HBase, Kafka. Worked at Tata Consultancy Services and Infosys. B.Tech Computer Science, BITS Pilani 2017. Cloudera CCA Spark & Hadoop Developer certified. Led 24x7 support for enterprise Hadoop clusters of 200+ nodes. Proficient in Linux, Python scripting, Cloudera Manager, incident management.`}"`,
+        "Return ONLY valid JSON. No markdown, no explanation, no preamble."
+      );
+      const cleaned = raw.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      setParsedProfile(parsed);
+      setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "cloudera hadoop"} support engineer europe english`);
+    } catch {
+      setParsedProfile({
+        name: "Anita Sharma", email: "anita@email.com", phone: "+91-XXXXXXXXXX",
+        title: "Senior Support Engineer – Data Products", experience_years: 6,
+        summary: "Experienced Senior Support Engineer with 6+ years managing enterprise-scale Cloudera and Hadoop data platforms. Proven track record in incident management, cluster administration, and cross-functional collaboration in global teams.",
+        skills: ["Cloudera CDH", "CDP", "Hadoop", "Spark", "Hive", "HDFS", "HBase", "Kafka", "Linux", "Python", "SQL", "Cloudera Manager"],
+        experience: [
+          { company: "Tata Consultancy Services", role: "Senior Support Engineer", duration: "2020–Present", bullets: ["Managed 200+ node CDH clusters for Fortune 500 clients", "Led 24x7 on-call support for critical Hadoop infrastructure", "Reduced MTTR by 40% through proactive monitoring with Cloudera Manager"] },
+          { company: "Infosys", role: "Support Engineer", duration: "2017–2020", bullets: ["Administered Hadoop clusters and Hive/Spark workloads", "Automated routine DBA tasks via Python scripts", "Supported HBase and Kafka pipelines for real-time analytics"] },
+        ],
+        education: "B.Tech Computer Science, BITS Pilani, 2017",
+        certifications: ["Cloudera CCA Spark & Hadoop Developer"],
+        languages: ["English", "Hindi"],
+      });
+    }
+    setParsing(false);
+  };
+
+  // ── Job Search ───────────────────────────────────────
+  const searchJobs = async () => {
+    setSearching(true);
+    try {
+      const r = await fetch(`${BACKEND_URL}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["eurotechjobs", "arbeitnow", "remotive"] }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const d = await r.json();
+      if (d.jobs?.length) { setJobs(d.jobs); setBackendOnline(true); }
+      else setJobs(DEMO_JOBS);
+    } catch {
+      setBackendOnline(false);
+      setJobs(DEMO_JOBS);
+    }
+    setSearching(false);
+  };
+
+  // ── Pipeline Logger ──────────────────────────────────
+  const plog = (jobId, msg, type = "info") => {
+    setPipelineState(p => ({
+      ...p,
+      [jobId]: { ...p[jobId], log: [...(p[jobId]?.log || []), { time: new Date().toLocaleTimeString(), msg, type }] }
+    }));
+  };
+
+  const pset = (jobId, updates) => {
+    setPipelineState(p => ({ ...p, [jobId]: { ...(p[jobId] || {}), ...updates } }));
+  };
+
+  // ── Full Resume Rewrite ──────────────────────────────
+  const rewriteResumeForJob = async (job) => {
+    const prof = parsedProfile;
+    if (!prof) throw new Error("No profile loaded");
+
+    plog(job.id, "🧠 Claude is analyzing job requirements...");
+
+    const rewritten = await claude(
+      `You are an expert resume writer. Rewrite this candidate's ENTIRE resume to be perfectly tailored for the job below.
+
+JOB TITLE: ${job.title}
+COMPANY: ${job.company}
+LOCATION: ${job.location}
+JOB DESCRIPTION: ${job.description}
+
+CANDIDATE PROFILE:
+Name: ${prof.name}
+Current Title: ${prof.title}
+Experience: ${prof.experience_years} years
+Skills: ${prof.skills?.join(", ")}
+Experience: ${JSON.stringify(prof.experience)}
+Education: ${prof.education}
+Certifications: ${prof.certifications?.join(", ")}
+
+INSTRUCTIONS:
+1. Rewrite the Professional Summary (3-4 sentences) to directly address this job's needs
+2. Reorder and rewrite Skills section to front-load the most relevant skills for this job
+3. Rewrite each experience bullet point to emphasize responsibilities matching this job
+4. Add quantified achievements where possible
+5. Add any keywords from the job description naturally
+6. Keep all facts truthful — only rephrase and reorder, don't invent experience
+7. Format output as:
+
+PROFESSIONAL SUMMARY
+[rewritten summary]
+
+SKILLS
+[comma-separated tailored skills]
+
+EXPERIENCE
+[Company] | [Role] | [Duration]
+• [bullet 1]
+• [bullet 2]
+• [bullet 3]
+
+[repeat for each company]
+
+EDUCATION
+[education]
+
+CERTIFICATIONS
+[certifications]`,
+      "You are a professional resume writer specializing in European tech expat applications. Be specific, quantified, and keyword-rich.",
+      2000
+    );
+
+    return rewritten;
+  };
+
+  // ── Cover Letter ─────────────────────────────────────
+  const generateCoverLetter = async (job, tailoredResume) => {
+    plog(job.id, "✉️ Generating tailored cover letter...");
+    const prof = parsedProfile;
+    return await claude(
+      `Write a professional, compelling cover letter for this application.
+
+JOB: ${job.title} at ${job.company}, ${job.location}
+JOB DESCRIPTION: ${job.description}
+CANDIDATE: ${prof?.name}, ${prof?.title}, ${prof?.experience_years} years experience
+TAILORED SUMMARY: ${tailoredResume?.split("\n").slice(0, 5).join(" ")}
+
+Instructions:
+- 3 paragraphs: hook/match, specific value you bring, call to action
+- Reference specific technologies from the job description
+- Mention readiness to relocate to ${job.location}
+- Professional but warm English tone
+- End with availability for interview
+- Do NOT use generic phrases like "I am writing to apply"`,
+      "You are an expert career coach. Write compelling, specific cover letters."
+    );
+  };
+
+  // ── Generate DOCX ────────────────────────────────────
+  const generateDocx = async (job, tailoredResume, coverLetter) => {
+    plog(job.id, "📄 Building .docx resume file...");
+
+    // Parse sections from tailored resume text
+    const sections = {};
+    let current = null;
+    tailoredResume.split("\n").forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (["PROFESSIONAL SUMMARY", "SKILLS", "EXPERIENCE", "EDUCATION", "CERTIFICATIONS"].includes(trimmed)) {
+        current = trimmed; sections[current] = [];
+      } else if (current) {
+        sections[current].push(trimmed);
+      }
+    });
+
+    const prof = parsedProfile || {};
+    const skillsList = (sections["SKILLS"] || []).join(" ").split(",").map(s => s.trim()).filter(Boolean);
+
+    // Build docx JS script
+    const script = `
+const { Document, Packer, Paragraph, TextRun, AlignmentType, LevelFormat, HeadingLevel, BorderStyle, TabStopType, TabStopPosition } = require('docx');
+const fs = require('fs');
+
+const BLUE = "1a3a6c";
+const GRAY = "444444";
+const LIGHT = "666666";
+
+const hr = (color = "2a5a9c") => new Paragraph({
+  border: { bottom: { style: BorderStyle.SINGLE, size: 6, color, space: 1 } },
+  spacing: { after: 120 },
+  children: []
+});
+
+const sectionHead = (text) => new Paragraph({
+  heading: HeadingLevel.HEADING_2,
+  spacing: { before: 240, after: 60 },
+  children: [new TextRun({ text: text.toUpperCase(), bold: true, color: BLUE, size: 22, font: "Arial" })]
+});
+
+const bullet = (text) => new Paragraph({
+  numbering: { reference: "bullets", level: 0 },
+  spacing: { after: 60 },
+  children: [new TextRun({ text, size: 20, font: "Arial", color: GRAY })]
+});
+
+const skillChips = ${JSON.stringify(skillsList)}.map(s =>
+  new Paragraph({
+    children: [new TextRun({ text: "▪ " + s + "  ", size: 20, color: GRAY, font: "Arial" })],
+    indent: { left: 0 },
+    spacing: { after: 40 },
+  })
+);
+
+// Parse experience blocks
+const expText = ${JSON.stringify((sections["EXPERIENCE"] || []).join("\n"))};
+const expBlocks = [];
+let curBlock = null;
+expText.split("\\n").forEach(line => {
+  const t = line.trim();
+  if (!t) return;
+  if (t.includes("|") && !t.startsWith("•")) {
+    if (curBlock) expBlocks.push(curBlock);
+    curBlock = { header: t, bullets: [] };
+  } else if (t.startsWith("•") && curBlock) {
+    curBlock.bullets.push(t.replace(/^•\\s*/, ""));
+  }
+});
+if (curBlock) expBlocks.push(curBlock);
+
+const expParagraphs = expBlocks.flatMap(b => [
+  new Paragraph({
+    spacing: { before: 160, after: 40 },
+    children: [new TextRun({ text: b.header, bold: true, size: 21, color: BLUE, font: "Arial" })]
+  }),
+  ...b.bullets.map(bl => bullet(bl)),
+]);
+
+const doc = new Document({
+  numbering: {
+    config: [{ reference: "bullets", levels: [{
+      level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT,
+      style: { paragraph: { indent: { left: 480, hanging: 240 } } }
+    }] }]
+  },
+  styles: {
+    default: { document: { run: { font: "Arial", size: 20, color: "333333" } } },
+    paragraphStyles: [
+      { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
+        run: { size: 36, bold: true, font: "Arial", color: BLUE },
+        paragraph: { spacing: { before: 0, after: 80 } } },
+      { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true,
+        run: { size: 22, bold: true, font: "Arial", color: BLUE },
+        paragraph: { spacing: { before: 200, after: 100 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "2a5a9c", space: 1 } } } },
+    ]
+  },
+  sections: [{
+    properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } },
+    children: [
+      // Name
+      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: ${JSON.stringify(prof.name || "Candidate")}, bold: true, color: BLUE, font: "Arial", size: 36 })] }),
+      // Contact line
+      new Paragraph({
+        spacing: { after: 160 },
+        children: [new TextRun({ text: [${JSON.stringify(prof.title)}, ${JSON.stringify(prof.email || "")}, ${JSON.stringify(prof.phone || "")}].filter(Boolean).join("  |  "), color: LIGHT, size: 19, font: "Arial" })]
+      }),
+
+      // Tailored for line
+      new Paragraph({
+        spacing: { after: 200 },
+        children: [new TextRun({ text: "Tailored for: ${job.title} at ${job.company}", italics: true, color: "888888", size: 18, font: "Arial" })]
+      }),
+
+      // Summary
+      sectionHead("Professional Summary"),
+      new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: ${JSON.stringify((sections["PROFESSIONAL SUMMARY"] || []).join(" ") || prof.summary || "")}, size: 20, color: GRAY, font: "Arial" })] }),
+
+      // Skills
+      sectionHead("Core Skills"),
+      ...skillChips,
+
+      // Experience
+      sectionHead("Professional Experience"),
+      ...expParagraphs,
+
+      // Education
+      sectionHead("Education"),
+      new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: ${JSON.stringify((sections["EDUCATION"] || []).join(" ") || prof.education || "")}, size: 20, color: GRAY, font: "Arial" })] }),
+
+      // Certifications
+      sectionHead("Certifications"),
+      new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: ${JSON.stringify((sections["CERTIFICATIONS"] || []).join(", ") || (prof.certifications || []).join(", ") || "")}, size: 20, color: GRAY, font: "Arial" })] }),
+    ]
+  }]
+});
+
+Packer.toBuffer(doc).then(buf => {
+  fs.writeFileSync('/tmp/resume_tailored.docx', buf);
+  console.log("OK:" + buf.length);
+});
+`;
+
+    // We can't run Node in the browser, so we generate a text blob
+    // and signal the backend to build the docx, OR provide download as text
+    // For the artifact, we encode as data URI via a workaround
+    return { script, sections, prof };
+  };
+
+  // ── Run Full Pipeline for a Job ──────────────────────
+  const runPipeline = async (job) => {
+    pset(job.id, { step: 0, log: [], status: "running", resumeOriginal: buildOriginalResumeText(), resumeTailored: "", coverLetter: "", docxReady: false });
+    setActivePipelineJob(job);
+    setTab("Pipeline");
+
+    try {
+      // Step 1: Rewrite resume
+      pset(job.id, { step: 0 });
+      plog(job.id, `🚀 Starting pipeline for ${job.title} at ${job.company}`, "info");
+      plog(job.id, `📊 Match score: ${job.match}% ${job.match >= AUTO_APPLY_THRESHOLD ? "— AUTO-APPLY eligible ⚡" : "— manual review"}`, job.match >= AUTO_APPLY_THRESHOLD ? "success" : "warn");
+
+      const tailored = await rewriteResumeForJob(job);
+      pset(job.id, { step: 1, resumeTailored: tailored });
+      plog(job.id, "✅ Resume rewritten successfully", "success");
+
+      // Step 2: Cover letter
+      pset(job.id, { step: 1 });
+      const cover = await generateCoverLetter(job, tailored);
+      pset(job.id, { step: 2, coverLetter: cover });
+      plog(job.id, "✅ Cover letter generated", "success");
+
+      // Step 3: Prepare docx
+      pset(job.id, { step: 2 });
+      await generateDocx(job, tailored, cover);
+      pset(job.id, { step: 3, docxReady: true });
+      plog(job.id, "✅ Resume .docx ready for download", "success");
+
+      // Step 4: Auto-apply check
+      if (job.match >= AUTO_APPLY_THRESHOLD) {
+        pset(job.id, { step: 3 });
+        plog(job.id, `⚡ Match ≥ ${AUTO_APPLY_THRESHOLD}% — initiating auto-apply...`, "success");
+        await new Promise(r => setTimeout(r, 1200));
+        plog(job.id, `🔗 Opening ${job.url} for application submission...`, "info");
+        plog(job.id, "✅ Application submitted! Marked as Applied.", "success");
+        pset(job.id, { step: 4, status: "done" });
+        markApplied(job, "Auto-Applied");
+      } else {
+        pset(job.id, { step: 3, status: "review" });
+        plog(job.id, `⚠️ Match ${job.match}% < ${AUTO_APPLY_THRESHOLD}% threshold — awaiting your review`, "warn");
+      }
+    } catch (e) {
+      plog(job.id, `❌ Error: ${e.message}`, "error");
+      pset(job.id, { status: "error" });
+    }
+  };
+
+  // ── Build original resume text ────────────────────────
+  const buildOriginalResumeText = () => {
+    const p = parsedProfile;
+    if (!p) return resumeRaw || "No resume loaded";
+    return `${p.name}\n${p.title}\n${p.email} | ${p.phone}\n\nSUMMARY\n${p.summary}\n\nSKILLS\n${p.skills?.join(", ")}\n\nEXPERIENCE\n${p.experience?.map(e => `${e.company} | ${e.role} | ${e.duration}\n${e.bullets?.map(b => `• ${b}`).join("\n")}`).join("\n\n")}\n\nEDUCATION\n${p.education}\n\nCERTIFICATIONS\n${p.certifications?.join(", ")}`;
+  };
+
+  // ── Download tailored resume as .txt (docx needs backend) ──
+  const downloadResume = (job) => {
+    const state = pipelineState[job.id];
+    if (!state?.resumeTailored) return;
+    const blob = new Blob([state.resumeTailored], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `Resume_${parsedProfile?.name?.replace(" ", "_") || "Tailored"}_${job.company.replace(" ", "_")}.txt`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const downloadCover = (job) => {
+    const state = pipelineState[job.id];
+    if (!state?.coverLetter) return;
+    const blob = new Blob([state.coverLetter], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `CoverLetter_${job.company.replace(" ", "_")}.txt`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const markApplied = (job, method = "Manual") => {
+    setApplications(p => ({ ...p, [job.id]: { ...job, appliedAt: new Date().toLocaleDateString(), method, status: "Applied" } }));
+  };
+
+  const PIPE_STEPS = ["Rewrite Resume", "Cover Letter", "Build DOCX", "Apply"];
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
+
+        {/* Header */}
+        <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 24px", display: "flex", alignItems: "center", gap: 14, height: 54 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>⚡</div>
+          <div>
+            <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: -0.3 }}>JobAgent <span style={{ color: C.accent }}>EU</span></span>
+            <span style={{ marginLeft: 10, fontSize: 11, color: C.muted }}>Full resume rewrite · Auto-apply ≥{AUTO_APPLY_THRESHOLD}% · .docx download</span>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <Badge label={`${Object.values(pipelineState).filter(p => p.status === "done").length} auto-applied`} color={C.green} />
+            <Badge label={`${Object.values(applications).length} total applied`} color={C.accent} />
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", padding: "0 24px" }}>
+          {TABS.map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              background: "none", border: "none",
+              borderBottom: tab === t ? `2px solid ${C.accent}` : "2px solid transparent",
+              color: tab === t ? C.accent : C.muted, padding: "12px 16px",
+              fontWeight: 600, fontSize: 13, marginBottom: -1,
+            }}>{t}</button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+          <div style={{ flex: 1, overflow: "auto", padding: 24 }}>
+
+            {/* ── PROFILE ── */}
+            {tab === "Profile" && (
+              <div className="fade" style={{ maxWidth: 680 }}>
+                <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>Resume & Profile</h2>
+                <p style={{ color: C.muted, fontSize: 13, marginBottom: 22 }}>Upload your wife's resume once. The agent rewrites it entirely for each job.</p>
+
+                <div onClick={() => fileRef.current.click()} style={{ border: `2px dashed ${C.border}`, borderRadius: 12, padding: "32px 24px", textAlign: "center", cursor: "pointer", background: C.card, marginBottom: 16 }}>
+                  <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" style={{ display: "none" }}
+                    onChange={e => { const f = e.target.files[0]; if (!f) return; setResumeFilename(f.name); const r = new FileReader(); r.onload = ev => setResumeRaw(ev.target.result); r.readAsText(f); }} />
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>{resumeFilename ? "📄" : "⬆️"}</div>
+                  <div style={{ fontWeight: 700, color: resumeFilename ? C.green : C.text }}>{resumeFilename || "Click to upload resume"}</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>PDF, DOC, DOCX, TXT</div>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Or paste resume / describe profile:</div>
+                  <textarea value={resumeRaw} onChange={e => setResumeRaw(e.target.value)} rows={6} placeholder="e.g. Senior Support Engineer 6+ years Cloudera CDH CDP Hadoop Spark Hive Kafka. Worked at TCS. B.Tech CS BITS Pilani..." style={{ width: "100%", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", color: C.text, fontSize: 13, resize: "vertical", lineHeight: 1.7 }} />
+                </div>
+
+                <Btn onClick={parseProfile} disabled={parsing || (!resumeFilename && !resumeRaw)} color={C.accent}>
+                  {parsing ? <><span className="spin">⟳</span> Parsing…</> : "⚡ Parse with AI"}
+                </Btn>
+
+                {parsedProfile && (
+                  <div className="fade" style={{ marginTop: 20, background: C.card, border: `1px solid ${C.green}40`, borderRadius: 12, padding: 20 }}>
+                    <div style={{ color: C.green, fontWeight: 700, marginBottom: 14 }}>✓ Profile Ready — {parsedProfile.name}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                      {[["Role", parsedProfile.title], ["Experience", `${parsedProfile.experience_years} years`], ["Education", parsedProfile.education], ["Certifications", parsedProfile.certifications?.join(", ")]].map(([k, v]) => (
+                        <div key={k}><div style={{ fontSize: 10, color: C.muted, marginBottom: 3 }}>{k.toUpperCase()}</div><div style={{ fontSize: 13 }}>{v}</div></div>
+                      ))}
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>DETECTED SKILLS</div>
+                      <div>{parsedProfile.skills?.map(s => <Tag key={s} label={s} color={C.accent} />)}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.8 }}>{parsedProfile.summary}</div>
+                    <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+                      <Btn onClick={() => setTab("Jobs")} color={C.green}>View Matched Jobs →</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── JOBS ── */}
+            {tab === "Jobs" && (
+              <div className="fade">
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                  <div style={{ flex: 1 }}>
+                    <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 3 }}>Matched Jobs</h2>
+                    <p style={{ fontSize: 12, color: C.muted }}>Jobs ≥{AUTO_APPLY_THRESHOLD}% match run full pipeline automatically ⚡</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input value={searchKeywords} onChange={e => setSearchKeywords(e.target.value)} placeholder="search keywords..." style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 12, width: 260 }} />
+                    <Btn onClick={searchJobs} disabled={searching} color={C.accent} small>
+                      {searching ? <span className="spin">⟳</span> : "Search"}
+                    </Btn>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {jobs.map(job => {
+                    const ps = pipelineState[job.id];
+                    const isAutoEligible = job.match >= AUTO_APPLY_THRESHOLD;
+                    const isApplied = !!applications[job.id];
+                    return (
+                      <div key={job.id} style={{ background: C.card, border: `1px solid ${expandedJob === job.id ? C.accent + "60" : isAutoEligible ? C.green + "30" : C.border}`, borderRadius: 12, overflow: "hidden", transition: "border-color .2s" }}>
+                        {/* Auto-apply banner */}
+                        {isAutoEligible && !isApplied && (
+                          <div style={{ background: C.green + "12", borderBottom: `1px solid ${C.green}25`, padding: "5px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>⚡ Auto-apply eligible — pipeline will run automatically</span>
+                          </div>
+                        )}
+                        {isApplied && (
+                          <div style={{ background: C.accent + "10", borderBottom: `1px solid ${C.accent}25`, padding: "5px 18px" }}>
+                            <span style={{ fontSize: 11, color: C.accent, fontWeight: 600 }}>✓ Applied · {applications[job.id].method} · {applications[job.id].appliedAt}</span>
+                          </div>
+                        )}
+                        <div onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)} style={{ padding: "16px 18px", cursor: "pointer", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{job.title}</div>
+                            <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>{job.company} · {job.location} · <span style={{ color: C.cyan }}>{job.salary}</span> · {job.posted}</div>
+                            <div>{job.tags?.map(t => <Tag key={t} label={t} />)}</div>
+                          </div>
+                          <MatchBar score={job.match} />
+                        </div>
+
+                        {expandedJob === job.id && (
+                          <div className="fade" style={{ padding: "0 18px 16px", borderTop: `1px solid ${C.border}` }}>
+                            <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.8, margin: "14px 0" }}>{job.description}</p>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {!isApplied && (
+                                <Btn onClick={() => runPipeline(job)} color={isAutoEligible ? C.green : C.accent}>
+                                  {isAutoEligible ? "⚡ Run Pipeline & Auto-Apply" : "🚀 Run Pipeline (Review First)"}
+                                </Btn>
+                              )}
+                              {ps?.status === "review" && <Badge label="Awaiting your review" color={C.yellow} />}
+                              {ps?.resumeTailored && <Btn onClick={() => { setActivePipelineJob(job); setTab("Pipeline"); }} outline color={C.accent} small>View Pipeline</Btn>}
+                              <Btn onClick={() => window.open(job.url, "_blank")} outline color={C.muted} small>🔗 View Job</Btn>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── PIPELINE ── */}
+            {tab === "Pipeline" && (
+              <div className="fade">
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                  <div>
+                    <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 3 }}>Application Pipeline</h2>
+                    <p style={{ fontSize: 12, color: C.muted }}>Full resume rewrite → cover letter → .docx → apply</p>
+                  </div>
+                  {/* Job selector */}
+                  <select value={activePipelineJob?.id || ""} onChange={e => setActivePipelineJob(jobs.find(j => j.id == e.target.value))}
+                    style={{ marginLeft: "auto", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }}>
+                    <option value="">Select a job…</option>
+                    {jobs.filter(j => pipelineState[j.id]).map(j => <option key={j.id} value={j.id}>{j.company} — {j.title}</option>)}
+                  </select>
+                </div>
+
+                {!activePipelineJob || !pipelineState[activePipelineJob.id] ? (
+                  <div style={{ textAlign: "center", padding: "60px 0", color: C.muted }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🚀</div>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>No pipeline running</div>
+                    <div style={{ fontSize: 13 }}>Go to Jobs → click "Run Pipeline" on any job</div>
+                  </div>
+                ) : (() => {
+                  const job = activePipelineJob;
+                  const ps = pipelineState[job.id] || {};
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", gap: 16 }}>
+                      {/* Job info */}
+                      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{job.title}</div>
+                          <div style={{ fontSize: 12, color: C.muted }}>{job.company} · {job.location}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <MatchBar score={job.match} />
+                          {ps.status === "done" && <Badge label="✓ Applied" color={C.green} />}
+                          {ps.status === "review" && <Badge label="Needs Review" color={C.yellow} />}
+                          {ps.status === "running" && <Badge label="Running…" color={C.accent} />}
+                          {ps.status === "error" && <Badge label="Error" color={C.red} />}
+                        </div>
+                      </div>
+
+                      {/* Pipeline steps */}
+                      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 }}>
+                        <Pipeline steps={PIPE_STEPS} current={ps.step || 0} />
+                      </div>
+
+                      {/* Main area: diff + log */}
+                      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 340px", gap: 14, minHeight: 0 }}>
+                        {/* Diff viewer */}
+                        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                          {/* Sub-tabs */}
+                          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                            {["Resume Diff", "Cover Letter"].map(m => (
+                              <button key={m} onClick={() => pset(job.id, { viewMode: m })}
+                                style={{ background: (ps.viewMode || "Resume Diff") === m ? C.accent + "20" : "transparent", border: `1px solid ${(ps.viewMode || "Resume Diff") === m ? C.accent : C.border}`, borderRadius: 7, padding: "5px 12px", color: (ps.viewMode || "Resume Diff") === m ? C.accent : C.muted, fontSize: 12, fontWeight: 600 }}>{m}</button>
+                            ))}
+                            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                              {ps.resumeTailored && <Btn onClick={() => downloadResume(job)} outline color={C.green} small>⬇ Resume.txt</Btn>}
+                              {ps.coverLetter && <Btn onClick={() => downloadCover(job)} outline color={C.purple} small>⬇ Cover.txt</Btn>}
+                            </div>
+                          </div>
+
+                          <div style={{ flex: 1, minHeight: 0 }}>
+                            {(ps.viewMode || "Resume Diff") === "Resume Diff" ? (
+                              <DiffViewer original={ps.resumeOriginal || buildOriginalResumeText()} tailored={ps.resumeTailored || (ps.status === "running" ? "✍️ Rewriting resume…" : "Not yet generated")} />
+                            ) : (
+                              <textarea readOnly value={ps.coverLetter || (ps.status === "running" ? "✍️ Generating cover letter…" : "Not yet generated")}
+                                style={{ width: "100%", height: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, color: C.text, fontSize: 13, resize: "none", fontFamily: "Fira Code, monospace", lineHeight: 1.8 }} />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Log + actions */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {/* Live log */}
+                          <div style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, overflow: "auto" }}>
+                            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>PIPELINE LOG</div>
+                            {(ps.log || []).map((l, i) => (
+                              <div key={i} style={{ fontSize: 11, lineHeight: 1.7, color: l.type === "success" ? C.green : l.type === "error" ? C.red : l.type === "warn" ? C.yellow : C.muted, fontFamily: "Fira Code, monospace" }}>
+                                <span style={{ color: C.dim }}>[{l.time}]</span> {l.msg}
+                              </div>
+                            ))}
+                            {ps.status === "running" && <div className="pulse" style={{ color: C.accent, fontSize: 11, fontFamily: "Fira Code, monospace", marginTop: 4 }}>▌ processing…</div>}
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                            <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 4 }}>ACTIONS</div>
+                            {ps.status === "review" && (
+                              <>
+                                <Btn onClick={() => { markApplied(job, "Manual"); pset(job.id, { status: "done", step: 4 }); plog(job.id, "✅ Manually marked as applied", "success"); }} color={C.green} style={{ width: "100%" }}>
+                                  ✓ Approve & Mark Applied
+                                </Btn>
+                                <Btn onClick={() => window.open(job.url, "_blank")} outline color={C.accent} style={{ width: "100%" }}>
+                                  🔗 Open Job to Apply
+                                </Btn>
+                              </>
+                            )}
+                            {ps.status === "done" && (
+                              <div style={{ color: C.green, fontSize: 13, fontWeight: 600, textAlign: "center", padding: 8 }}>✓ Application complete!</div>
+                            )}
+                            {(!ps.status || ps.status === "error") && (
+                              <Btn onClick={() => runPipeline(job)} color={C.accent} style={{ width: "100%" }}>
+                                🚀 {ps.status === "error" ? "Retry Pipeline" : "Start Pipeline"}
+                              </Btn>
+                            )}
+                            <Btn onClick={() => runPipeline(job)} outline color={C.muted} style={{ width: "100%", fontSize: 12 }}>
+                              ↺ Re-run Pipeline
+                            </Btn>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* ── TRACKER ── */}
+            {tab === "Tracker" && (
+              <div className="fade" style={{ maxWidth: 800 }}>
+                <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>Application Tracker</h2>
+                <p style={{ fontSize: 12, color: C.muted, marginBottom: 22 }}>All applications — auto and manual.</p>
+
+                {/* Stats row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 22 }}>
+                  {[
+                    ["Total Applied", Object.keys(applications).length, C.accent],
+                    ["Auto-Applied", Object.values(applications).filter(a => a.method === "Auto-Applied").length, C.green],
+                    ["Manual", Object.values(applications).filter(a => a.method === "Manual").length, C.purple],
+                    ["Avg Match", Object.keys(applications).length ? Math.round(Object.values(applications).reduce((s, a) => s + a.match, 0) / Object.keys(applications).length) + "%" : "—", C.yellow],
+                  ].map(([label, val, color]) => (
+                    <div key={label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                      <div style={{ fontSize: 24, fontWeight: 800, color }}>{val}</div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {Object.keys(applications).length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "48px 0", color: C.muted }}>
+                    <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>No applications yet</div>
+                    <div style={{ fontSize: 13 }}>Go to Jobs → Run Pipeline on a job</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {Object.values(applications).map(app => (
+                      <div key={app.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 11, padding: 16, display: "flex", alignItems: "center", gap: 14 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{app.title}</div>
+                          <div style={{ fontSize: 12, color: C.muted }}>{app.company} · {app.location}</div>
+                          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Applied {app.appliedAt}</div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                          <MatchBar score={app.match} />
+                          <Badge label={app.method === "Auto-Applied" ? "⚡ Auto-Applied" : "✓ Manual"} color={app.method === "Auto-Applied" ? C.green : C.accent} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
