@@ -142,20 +142,23 @@ export default function App() {
 
   const fileRef = useRef();
 
-  // ── Claude API ───────────────────────────────────────
-  const claude = async (prompt, system = "", maxTokens = 1500) => {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
+  // ── Backend API helpers ─────────────────────────────
+  const backendCall = async (endpoint, body) => {
+    const r = await fetch(`${BACKEND_URL}/${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: maxTokens,
-        system: system || "You are an expert resume writer and career coach for European tech expat roles.",
-        messages: [{ role: "user", content: prompt }],
-      }),
+      body: JSON.stringify(body),
     });
+    if (!r.ok) throw new Error(`Server error ${r.status}`);
     const d = await r.json();
-    return d.content?.[0]?.text || "";
+    if (d.error) throw new Error(d.error);
+    return d;
+  };
+
+  // Keep claude() for backward compat — routes through backend /generate
+  const claude = async (prompt, system = "", maxTokens = 1000) => {
+    const d = await backendCall("generate", { type: "raw", prompt, system, max_tokens: maxTokens });
+    return d.content || "";
   };
 
   // ── Parse Profile ────────────────────────────────────
@@ -167,33 +170,9 @@ export default function App() {
     setParsing(true);
     setParseError("");
     try {
-      // Step 1: Extract key fields individually to avoid JSON truncation
-      const snippet = resumeRaw.slice(0, 1500);
-      const raw = await claude(
-        `Extract info from this resume. Return ONLY a JSON object. Be concise - keep bullets under 8 words each, max 3 bullets per job, max 8 skills total.
-
-{"name":"","email":"","phone":"","title":"","summary":"one sentence","experience_years":0,"skills":[],"experience":[{"company":"","role":"","duration":"","bullets":[]}],"education":"","certifications":[],"languages":[]}
-
-RESUME:
-${snippet}`,
-        "Return ONLY the filled JSON object. No markdown. No explanation. Keep all string values short and concise.",
-        1000
-      );
-      const cleaned = raw.replace(/```json|```/g, "").trim();
-      // Try to salvage partial JSON if truncated
-      let parsed;
-      try {
-        parsed = JSON.parse(cleaned);
-      } catch {
-        // Try to fix truncated JSON by closing open brackets
-        const fixed = cleaned
-          .replace(/,\s*$/, "")
-          .replace(/"\s*$/, '""')
-          + (cleaned.split("{").length > cleaned.split("}").length ? "}" : "")
-          + (cleaned.split("[").length > cleaned.split("]").length ? "]}" : "");
-        try { parsed = JSON.parse(fixed); } catch { parsed = null; }
-      }
-      if (!parsed || !parsed.name) throw new Error("Could not extract name — please make sure the resume starts with the candidate's full name");
+      const d = await backendCall("parse", { text: resumeRaw.slice(0, 3000) });
+      const parsed = d.profile;
+      if (!parsed || !parsed.name) throw new Error("Could not extract name — make sure resume starts with the candidate's full name");
       setParsedProfile(parsed);
       setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "support engineer"} support engineer europe english`);
     } catch (e) {
