@@ -146,12 +146,7 @@ export default function App() {
   const claude = async (prompt, system = "", maxTokens = 1500) => {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-  "Content-Type": "application/json",
-  "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "",
-  "anthropic-version": "2023-06-01",
-  "anthropic-dangerous-direct-browser-access": "true",
-},
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: maxTokens,
@@ -172,35 +167,37 @@ export default function App() {
     setParsing(true);
     setParseError("");
     try {
+      // Step 1: Extract key fields individually to avoid JSON truncation
+      const snippet = resumeRaw.slice(0, 1500);
       const raw = await claude(
-        `Parse this resume/profile. Return ONLY valid JSON (no markdown, no extra text):
-{
-  "name": "string",
-  "email": "string",
-  "phone": "string",
-  "title": "string",
-  "summary": "string (2-3 sentences)",
-  "experience_years": number,
-  "skills": ["string"],
-  "experience": [{"company": "string", "role": "string", "duration": "string", "bullets": ["string"]}],
-  "education": "string",
-  "certifications": ["string"],
-  "languages": ["string"]
-}
+        `Extract info from this resume. Return ONLY a JSON object. Be concise - keep bullets under 8 words each, max 3 bullets per job, max 8 skills total.
 
-Resume text to parse:
-"""
-${resumeRaw.slice(0, 4000)}
-"""`,
-        "You are a resume parser. Return ONLY valid JSON matching the schema exactly. No markdown, no explanation, no preamble."
+{"name":"","email":"","phone":"","title":"","summary":"one sentence","experience_years":0,"skills":[],"experience":[{"company":"","role":"","duration":"","bullets":[]}],"education":"","certifications":[],"languages":[]}
+
+RESUME:
+${snippet}`,
+        "Return ONLY the filled JSON object. No markdown. No explanation. Keep all string values short and concise.",
+        1000
       );
       const cleaned = raw.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-      if (!parsed.name) throw new Error("Could not extract name from resume");
+      // Try to salvage partial JSON if truncated
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // Try to fix truncated JSON by closing open brackets
+        const fixed = cleaned
+          .replace(/,\s*$/, "")
+          .replace(/"\s*$/, '""')
+          + (cleaned.split("{").length > cleaned.split("}").length ? "}" : "")
+          + (cleaned.split("[").length > cleaned.split("]").length ? "]}" : "");
+        try { parsed = JSON.parse(fixed); } catch { parsed = null; }
+      }
+      if (!parsed || !parsed.name) throw new Error("Could not extract name — please make sure the resume starts with the candidate's full name");
       setParsedProfile(parsed);
       setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "support engineer"} support engineer europe english`);
     } catch (e) {
-      setParseError(`Could not parse resume: ${e.message}. Please paste the resume as plain text below.`);
+      setParseError(`${e.message}`);
     }
     setParsing(false);
   };
