@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const BACKEND_URL = "http://localhost:5000";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA ────────────────────────────────────────────
@@ -123,6 +123,7 @@ export default function App() {
   const [parsedProfile, setParsedProfile] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState("");
+  const [resumeFile, setResumeFile] = useState(null);
 
   // Jobs
   const [jobs, setJobs] = useState(DEMO_JOBS);
@@ -162,21 +163,37 @@ export default function App() {
   };
 
   // ── Parse Profile ────────────────────────────────────
-  const parseProfile = async () => {
-    if (!resumeRaw || resumeRaw.trim().length < 20) {
-      alert("Please paste your resume text or upload a text/doc file first.");
+  const parseProfile = async (uploadedFile = null) => {
+    const fileToUse = uploadedFile || resumeFile;
+    const hasText = resumeRaw && resumeRaw.trim().length > 20;
+    if (!fileToUse && !hasText) {
+      setParseError("Please upload a PDF/Word file or paste resume text below.");
       return;
     }
     setParsing(true);
     setParseError("");
     try {
-      const d = await backendCall("parse", { text: resumeRaw.slice(0, 3000) });
+      let d;
+      if (fileToUse) {
+        // Send file directly to backend for server-side parsing
+        const formData = new FormData();
+        formData.append("file", fileToUse);
+        const r = await fetch(`${BACKEND_URL}/parse`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        d = await r.json();
+        if (d.error) throw new Error(d.error);
+      } else {
+        d = await backendCall("parse", { text: resumeRaw.slice(0, 3000) });
+      }
       const parsed = d.profile;
       if (!parsed || !parsed.name) throw new Error("Could not extract name — make sure resume starts with the candidate's full name");
       setParsedProfile(parsed);
       setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "support engineer"} support engineer europe english`);
     } catch (e) {
-      setParseError(`${e.message}`);
+      setParseError(e.message);
     }
     setParsing(false);
   };
@@ -563,18 +580,50 @@ Packer.toBuffer(doc).then(buf => {
             {tab === "Profile" && (
               <div className="fade" style={{ maxWidth: 680 }}>
                 <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>Resume & Profile</h2>
-                <p style={{ color: C.muted, fontSize: 13, marginBottom: 16 }}>Paste her resume text below — the AI will extract all details automatically.</p>
+                <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>Upload her resume file or paste text — Claude will extract all details automatically.</p>
 
-                <div style={{ background: C.yellow + "15", border: `1px solid ${C.yellow}40`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: C.yellow }}>
-                  💡 <strong>How to paste:</strong> Open her resume (PDF/Word) → Select All (Ctrl+A) → Copy (Ctrl+C) → Paste below (Ctrl+V)
+                {/* File Upload Zone */}
+                <div
+                  onClick={() => fileRef.current.click()}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files[0];
+                    if (f) { setResumeFile(f); setResumeFilename(f.name); setParseError(""); parseProfile(f); }
+                  }}
+                  style={{ border: `2px dashed ${resumeFile ? C.green : C.border}`, borderRadius: 14, padding: "36px 24px", textAlign: "center", cursor: "pointer", background: resumeFile ? C.green + "08" : C.card, marginBottom: 16, transition: "all .2s" }}>
+                  <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" style={{ display: "none" }}
+                    onChange={e => {
+                      const f = e.target.files[0];
+                      if (!f) return;
+                      setResumeFile(f);
+                      setResumeFilename(f.name);
+                      setParseError("");
+                      parseProfile(f);
+                    }} />
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>{resumeFile ? "📄" : "⬆️"}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: resumeFile ? C.green : C.text, marginBottom: 4 }}>
+                    {resumeFile ? resumeFile.name : "Click or drag & drop resume here"}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.muted }}>PDF, DOCX, DOC, TXT supported</div>
+                  {resumeFile && !parsing && !parsedProfile && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.accent }}>⟳ Parsing automatically…</div>
+                  )}
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>Resume text: <span style={{ color: C.accent }}>paste here</span></div>
-                  <textarea value={resumeRaw} onChange={e => { setResumeRaw(e.target.value); setParseError(""); }} rows={10}
-                    placeholder="Paste her full resume here — name, email, phone, work experience, skills, education, certifications..."
+                {/* Divider */}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <div style={{ flex: 1, height: 1, background: C.border }} />
+                  <span style={{ fontSize: 12, color: C.muted }}>or paste text</span>
+                  <div style={{ flex: 1, height: 1, background: C.border }} />
+                </div>
+
+                {/* Text paste area */}
+                <div style={{ marginBottom: 16 }}>
+                  <textarea value={resumeRaw} onChange={e => { setResumeRaw(e.target.value); setResumeFile(null); setResumeFilename(""); setParseError(""); }} rows={6}
+                    placeholder="Paste resume text here as an alternative to file upload..."
                     style={{ width: "100%", background: C.card, border: `1px solid ${resumeRaw.length > 50 ? C.green + "60" : C.border}`, borderRadius: 10, padding: "12px 14px", color: C.text, fontSize: 13, resize: "vertical", lineHeight: 1.7 }} />
-                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{resumeRaw.length} characters {resumeRaw.length > 100 ? "✓ ready to parse" : "— paste more content"}</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{resumeRaw.length} characters</div>
                 </div>
 
                 {parseError && (
@@ -583,7 +632,7 @@ Packer.toBuffer(doc).then(buf => {
                   </div>
                 )}
 
-                <Btn onClick={parseProfile} disabled={parsing || !resumeRaw || resumeRaw.trim().length < 50} color={C.accent}>
+                <Btn onClick={() => parseProfile()} disabled={parsing || (!resumeFile && (!resumeRaw || resumeRaw.trim().length < 20))} color={C.accent}>
                   {parsing ? <><span className="spin">⟳</span> Parsing with AI…</> : "⚡ Parse Resume with AI"}
                 </Btn>
 
