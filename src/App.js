@@ -1,17 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const BACKEND_URL = "http://localhost:5000";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
-// ── DEMO DATA ────────────────────────────────────────────
-const DEMO_JOBS = [
-  { id: 1, title: "Senior Data Platform Support Engineer", company: "ASML", location: "Eindhoven, Netherlands", salary: "€70k–€90k", tags: ["Cloudera", "Hadoop", "English Only", "Visa Sponsor"], match: 94, url: "https://relocate.me", source: "Relocate.me", posted: "2d ago", description: "We are looking for a Senior Data Platform Support Engineer to join our data infrastructure team. You will support and maintain our large-scale Hadoop/Cloudera-based data platform used by 2000+ engineers globally. Key requirements: 5+ years with Cloudera CDH/CDP, Hadoop cluster administration, Spark, Hive, HDFS, Kafka. Strong Linux troubleshooting. Experience with monitoring tools (Cloudera Manager, Grafana). English is our working language. Relocation and visa support provided." },
-  { id: 2, title: "Big Data Support Engineer", company: "Booking.com", location: "Amsterdam, Netherlands", salary: "€65k–€85k", tags: ["CDH", "Spark", "Hive", "Relocation Package"], match: 91, url: "https://eurotechjobs.com", source: "EuroTechJobs", posted: "1d ago", description: "Booking.com's Data Infrastructure team is hiring a Big Data Support Engineer. You'll support CDH clusters, troubleshoot Spark jobs, manage HDFS storage, and collaborate with data engineering teams. Requirements: 4+ years CDH/Spark/Hive, HBase experience a plus, Python scripting, incident management. Full English-speaking environment. Competitive relocation package." },
-  { id: 3, title: "Data Infrastructure Support Specialist", company: "Zalando", location: "Berlin, Germany", salary: "€60k–€80k", tags: ["Cloudera", "Kafka", "English OK", "Stock Options"], match: 87, url: "https://arbeitnow.com", source: "Arbeitnow", posted: "3d ago", description: "Zalando is seeking a Data Infrastructure Support Specialist for our Berlin HQ. Responsibilities include managing Cloudera clusters, Kafka pipeline support, performance tuning, incident response. English is the working language. 4+ years big data support experience required. Kafka, Flink experience valued. Stock options included." },
-  { id: 4, title: "Cloudera Platform Engineer", company: "ING Bank", location: "Amsterdam, Netherlands", salary: "€75k–€95k", tags: ["Cloudera", "CDP", "Visa Sponsor", "Banking"], match: 83, url: "https://remotive.com", source: "Remotive", posted: "5d ago", description: "ING Bank is hiring a Cloudera Platform Engineer to own our CDP deployment across EU regions. You'll troubleshoot cluster issues, manage upgrades, work with data teams on performance. Requirements: Cloudera CDP certified preferred, 5+ years, banking domain a plus. Visa sponsorship available. All-English teams." },
-  { id: 5, title: "Senior Support Engineer – Data Products", company: "Spotify", location: "Stockholm, Sweden", salary: "€80k–€100k", tags: ["Hadoop", "GCP", "English Only", "Relocation"], match: 79, url: "https://relocate.me", source: "Relocate.me", posted: "1w ago", description: "Spotify is looking for a Senior Support Engineer for our data products team in Stockholm. You'll support Hadoop-based pipelines processing billions of events daily. GCP experience valued. Cloudera background helpful. Must be comfortable in a fast-paced English-only environment. Full relocation package." },
-];
+// ── DEMO DATA (generic — shown before live search) ───────
+const DEMO_JOBS = [];  // No hardcoded jobs — always use live search
 
 // ── THEME ────────────────────────────────────────────────
 const C = {
@@ -191,7 +185,11 @@ export default function App() {
       const parsed = d.profile;
       if (!parsed || !parsed.name) throw new Error("Could not extract name — make sure resume starts with the candidate's full name");
       setParsedProfile(parsed);
-      setSearchKeywords(`${parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "support engineer"} support engineer europe english`);
+      // Build smart keywords from any profile type
+      const topSkills = parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "";
+      const cleanTitle = (parsed.title || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+      const combined = `${cleanTitle} ${topSkills}`.trim();
+      setSearchKeywords(combined || "senior engineer europe english");
     } catch (e) {
       setParseError(e.message);
     }
@@ -205,7 +203,7 @@ export default function App() {
       const r = await fetch(`${BACKEND_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["eurotechjobs", "arbeitnow", "remotive"] }),
+        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["arbeitnow", "remotive", "adzuna"], adzuna_app_id: "e54fec0b", adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d" }),
         signal: AbortSignal.timeout(5000),
       });
       const d = await r.json();
@@ -580,7 +578,7 @@ Packer.toBuffer(doc).then(buf => {
             {tab === "Profile" && (
               <div className="fade" style={{ maxWidth: 680 }}>
                 <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>Resume & Profile</h2>
-                <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>Upload her resume file or paste text — Claude will extract all details automatically.</p>
+                <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>Upload your resume file or paste text — Claude will extract your profile automatically.</p>
 
                 {/* File Upload Zone */}
                 <div
