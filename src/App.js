@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const BACKEND_URL = "http://localhost:5000";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA (generic — shown before live search) ───────
@@ -203,7 +203,7 @@ export default function App() {
       const r = await fetch(`${BACKEND_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["arbeitnow", "remotive", "adzuna"], adzuna_app_id: "e54fec0b", adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d" }),
+        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["arbeitnow","remotive","weworkremotely","themuse","stepstone","bundesagentur","adzuna"], adzuna_app_id: "e54fec0b", adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d" }),
         signal: AbortSignal.timeout(5000),
       });
       const d = await r.json();
