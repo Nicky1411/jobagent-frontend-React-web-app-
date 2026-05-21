@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+const BACKEND_URL = "http://localhost:5000";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA (generic — shown before live search) ───────
@@ -543,6 +543,55 @@ Packer.toBuffer(doc).then(buf => {
     setApplications(p => ({ ...p, [job.id]: { ...job, appliedAt: new Date().toLocaleDateString(), method, status: "Applied" } }));
   };
 
+  // ── Run Agent ──────────────────────────────────────
+  const runAgent = async () => {
+    if (!parsedProfile) { alert("Please parse your resume first in the Profile tab."); return; }
+    setAgentRunning(true);
+    setAgentLog([]);
+    setAgentResult(null);
+    const addLog = (msg, type = "info") => setAgentLog(l => [...l, { time: new Date().toLocaleTimeString(), msg, type }]);
+    addLog("🤖 Agent starting...");
+    addLog(`👤 Profile: ${parsedProfile.name} — ${parsedProfile.title}`);
+    addLog("🔍 Searching job boards in parallel...");
+    try {
+      const r = await fetch(`${BACKEND_URL}/agent/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile: parsedProfile,
+          state: agentState || {},
+          sources: ["arbeitnow","remotive","weworkremotely","themuse","adzuna"],
+          adzuna_app_id: "e54fec0b",
+          adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d",
+        }),
+      });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      setAgentState(data.state);
+      setAgentResult(data);
+      addLog(`✅ Completed in ${data.iterations} iterations`, "success");
+      addLog(`⚡ Auto-applied: ${data.applied_count || 0} jobs`, "success");
+      addLog(`👀 Needs approval: ${data.pending_approval?.length || 0} jobs`, "warn");
+      addLog(`✉️ Follow-ups drafted: ${data.followups_drafted?.length || 0}`, "info");
+      if (data.summary) addLog(`💬 ${data.summary}`, "success");
+      for (const action of (data.applied_jobs || [])) {
+        const job = data.state?.jobs?.[action.job_id] || {};
+        setApplications(p => ({ ...p, [action.job_id]: { ...job, id: action.job_id, appliedAt: new Date(action.time).toLocaleDateString(), method: "Auto-Applied ⚡", status: "Applied" } }));
+      }
+    } catch (e) {
+      addLog(`❌ Error: ${e.message}`, "error");
+    }
+    setAgentRunning(false);
+  };
+
+  const approveJob = async (jobId, approved) => {
+    const job = agentResult?.state?.jobs?.[jobId];
+    if (approved && job) {
+      setApplications(p => ({ ...p, [jobId]: { ...job, id: jobId, appliedAt: new Date().toLocaleDateString(), method: "Manual (Approved)", status: "Applied" } }));
+    }
+    setAgentResult(prev => ({ ...prev, pending_approval: (prev.pending_approval || []).filter(p => p.job_id !== jobId) }));
+  };
+
   const PIPE_STEPS = ["Rewrite Resume", "Cover Letter", "Build DOCX", "Apply"];
 
   return (
@@ -1041,6 +1090,10 @@ Packer.toBuffer(doc).then(buf => {
           </div>
         </div>
       </div>
+</div>
+    </div>
+    </div>
+    </div>
     </>
   );
 }
