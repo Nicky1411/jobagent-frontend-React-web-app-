@@ -106,7 +106,7 @@ const DiffViewer = ({ original, tailored }) => (
 );
 
 // ── MAIN APP ─────────────────────────────────────────────
-const TABS = ["Profile", "Jobs", "Pipeline", "Tracker"];
+const TABS = ["Profile", "Jobs", "Agent", "Pipeline", "Tracker"];
 
 export default function App() {
   const [tab, setTab] = useState("Profile");
@@ -134,6 +134,10 @@ export default function App() {
 
   // Tracker
   const [applications, setApplications] = useState({});
+  const [agentState, setAgentState] = useState(null); // persisted agent state
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [agentResult, setAgentResult] = useState(null);
+  const [agentLog, setAgentLog] = useState([]);
 
   const fileRef = useRef();
 
@@ -700,6 +704,17 @@ Packer.toBuffer(doc).then(buf => {
 
                         {expandedJob === job.id && (
                           <div className="fade" style={{ padding: "0 18px 16px", borderTop: `1px solid ${C.border}` }}>
+                            {/* Claude match reasoning */}
+                            {job.match_reason && (
+                              <div style={{ background: C.green + "12", border: `1px solid ${C.green}30`, borderRadius: 8, padding: "8px 14px", margin: "10px 0", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                                <span style={{ fontSize: 14 }}>🤖</span>
+                                <div>
+                                  <div style={{ fontSize: 11, color: C.green, fontWeight: 600, marginBottom: 2 }}>Claude's Assessment</div>
+                                  <div style={{ fontSize: 12, color: C.text }}>{job.match_reason}</div>
+                                  {job.match_highlight && <div style={{ fontSize: 11, color: C.cyan, marginTop: 2 }}>✦ {job.match_highlight}</div>}
+                                </div>
+                              </div>
+                            )}
                             <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.8, margin: "14px 0" }}>{job.description}</p>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               {!isApplied && (
@@ -836,6 +851,143 @@ Packer.toBuffer(doc).then(buf => {
                     </div>
                   );
                 })()}
+              </div>
+            )}
+
+            {/* ── AGENT TAB ── */}
+            {tab === "Agent" && (
+              <div className="fade">
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, gap: 16, flexWrap: "wrap" }}>
+                  <div>
+                    <h2 style={{ fontWeight: 800, fontSize: 22, marginBottom: 4 }}>🤖 Agent Mode</h2>
+                    <p style={{ fontSize: 13, color: C.muted, maxWidth: 560 }}>
+                      Claude autonomously searches jobs, evaluates matches, applies to high-scoring roles, requests your approval on medium matches, and drafts follow-up emails.
+                    </p>
+                  </div>
+                  <Btn onClick={runAgent} disabled={agentRunning || !parsedProfile} color={C.green} style={{ padding: "12px 28px", fontSize: 15, minWidth: 160 }}>
+                    {agentRunning ? <><span className="spin">⟳</span> Agent Running…</> : "⚡ Run Agent"}
+                  </Btn>
+                </div>
+
+                {/* How it works */}
+                {!agentResult && !agentRunning && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+                    {[
+                      { icon: "🔍", title: "Perceive", desc: "Scans 7 job boards, checks pending follow-ups" },
+                      { icon: "🧠", title: "Reason", desc: "Claude decides: auto-apply, ask approval, or skip" },
+                      { icon: "⚡", title: "Act", desc: "Applies to 85+ matches, requests approval for 60–84" },
+                      { icon: "✉️", title: "Follow-up", desc: "Drafts emails for applications 7+ days old" },
+                    ].map(s => (
+                      <div key={s.title} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
+                        <div style={{ fontSize: 24, marginBottom: 8 }}>{s.icon}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{s.title}</div>
+                        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>{s.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Thresholds */}
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>Decision Thresholds</div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {[["≥85% match", "Auto-apply ⚡", C.green], ["60–84% match", "Ask you first 👀", C.yellow], ["<60% match", "Skip silently", C.muted]].map(([score, action, color]) => (
+                      <div key={score} style={{ background: color + "15", border: `1px solid ${color}40`, borderRadius: 8, padding: "8px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+                        <span style={{ fontWeight: 700, color, fontSize: 13 }}>{score}</span>
+                        <span style={{ fontSize: 12, color: C.muted }}>→ {action}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live log */}
+                {(agentRunning || agentLog.length > 0) && (
+                  <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 8 }}>AGENT LOG</div>
+                    {agentLog.map((l, i) => (
+                      <div key={i} style={{ fontSize: 12, lineHeight: 1.8, color: l.type === "success" ? C.green : l.type === "error" ? C.red : l.type === "warn" ? C.yellow : C.muted, fontFamily: "Fira Code, monospace" }}>
+                        <span style={{ color: C.dim }}>[{l.time}]</span> {l.msg}
+                      </div>
+                    ))}
+                    {agentRunning && <div className="pulse" style={{ color: C.accent, fontSize: 12, fontFamily: "Fira Code", marginTop: 4 }}>▌ thinking...</div>}
+                  </div>
+                )}
+
+                {/* Results */}
+                {agentResult && (
+                  <div className="fade">
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 20 }}>
+                      {[
+                        ["Auto-Applied", agentResult.applied_count, C.green, "⚡"],
+                        ["Needs Approval", agentResult.pending_approval?.length || 0, C.yellow, "👀"],
+                        ["Follow-ups", agentResult.followups_drafted?.length || 0, C.accent, "✉️"],
+                        ["Iterations", agentResult.iterations, C.purple, "🔄"],
+                      ].map(([label, val, color, icon]) => (
+                        <div key={label} style={{ background: C.card, border: `1px solid ${color}30`, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color }}>{icon} {val}</div>
+                          <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Pending approvals */}
+                    {agentResult.pending_approval?.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: C.yellow }}>👀 Needs Your Approval</div>
+                        {agentResult.pending_approval.map(p => {
+                          const job = agentResult.state?.jobs?.[p.job_id] || {};
+                          return (
+                            <div key={p.job_id} style={{ background: C.card, border: `1px solid ${C.yellow}40`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{p.title} — {p.company}</div>
+                              <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{p.location} · <span style={{ color: C.yellow }}>{p.match}% match</span></div>
+                              {p.match_reason && <div style={{ fontSize: 12, color: C.muted, marginBottom: 8, fontStyle: "italic" }}>🤖 {p.match_reason}</div>}
+                              <div style={{ fontSize: 12, color: C.text, marginBottom: 12 }}>{p.reason}</div>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <Btn onClick={() => approveJob(p.job_id, true)} color={C.green} small>✓ Approve</Btn>
+                                <Btn onClick={() => approveJob(p.job_id, false)} outline color={C.red} small>✗ Skip</Btn>
+                                <Btn onClick={() => window.open(job.url, "_blank")} outline color={C.muted} small>🔗 View</Btn>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Follow-ups */}
+                    {agentResult.followups_drafted?.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: C.accent }}>✉️ Follow-up Emails</div>
+                        {agentResult.followups_drafted.map((f, i) => (
+                          <div key={i} style={{ background: C.card, border: `1px solid ${C.accent}30`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>{f.title} — {f.company}</div>
+                            <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>{f.days_since_applied} days since application</div>
+                            <textarea readOnly value={f.email_text} style={{ width: "100%", height: 100, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, color: C.text, fontSize: 12, resize: "none", fontFamily: "Fira Code, monospace", lineHeight: 1.7 }} />
+                            <Btn onClick={() => navigator.clipboard.writeText(f.email_text)} outline color={C.accent} small style={{ marginTop: 8 }}>📋 Copy</Btn>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Auto-applied */}
+                    {agentResult.applied_jobs?.length > 0 && (
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: C.green }}>⚡ Auto-Applied</div>
+                        {agentResult.applied_jobs.map((a, i) => {
+                          const job = agentResult.state?.jobs?.[a.job_id] || {};
+                          return (
+                            <div key={i} style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: 14, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: 14 }}>{a.title} — {a.company}</div>
+                                <div style={{ fontSize: 12, color: C.muted }}>{job.location} · {new Date(a.time).toLocaleTimeString()}</div>
+                              </div>
+                              <Badge label="⚡ Auto-Applied" color={C.green} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
