@@ -118,6 +118,15 @@ export default function App() {
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState("");
   const [resumeFile, setResumeFile] = useState(null);
+  const [prefs, setPrefs] = useState({
+    countries: ["Netherlands", "Germany"],
+    jobType: "any",
+    salaryMin: "",
+    englishOnly: true,
+    visaSponsorship: true,
+    customKeywords: "",
+    sources: ["arbeitnow", "remotive", "weworkremotely", "themuse", "adzuna"],
+  });
 
   // Jobs
   const [jobs, setJobs] = useState(DEMO_JOBS);
@@ -207,7 +216,14 @@ export default function App() {
       const r = await fetch(`${BACKEND_URL}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: searchKeywords, profile: parsedProfile || {}, sources: ["arbeitnow","remotive","weworkremotely","themuse","stepstone","bundesagentur","adzuna"], adzuna_app_id: "e54fec0b", adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d" }),
+        body: JSON.stringify({
+              keywords: searchKeywords + (prefs.customKeywords ? " " + prefs.customKeywords : ""),
+              profile: parsedProfile || {},
+              preferences: prefs,
+              sources: prefs.sources,
+              adzuna_app_id: "e54fec0b",
+              adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d"
+            }),
         signal: AbortSignal.timeout(5000),
       });
       const d = await r.json();
@@ -554,13 +570,27 @@ Packer.toBuffer(doc).then(buf => {
     addLog(`👤 Profile: ${parsedProfile.name} — ${parsedProfile.title}`);
     addLog("🔍 Searching job boards in parallel...");
     try {
+      // Build keywords from profile + preferences
+      const profileTitle = parsedProfile.title?.toLowerCase() || "";
+      const topSkills = parsedProfile.skills?.slice(0, 3).join(" ").toLowerCase() || "";
+      const customKw = prefs.customKeywords ? " " + prefs.customKeywords : "";
+      const locationKw = prefs.countries.filter(c => c !== "Remote/Worldwide").slice(0, 2).join(" OR ").toLowerCase();
+      const keywords = `${profileTitle} ${topSkills}${customKw} ${locationKw}`.trim();
+
+      addLog(`🔑 Keywords: "${keywords}"`);
+      addLog(`📍 Targets: ${prefs.countries.join(", ")}`);
+      addLog(`${prefs.visaSponsorship ? "✈️ Visa sponsorship required" : "📋 Visa sponsorship optional"}`);
+      addLog(`${prefs.englishOnly ? "🇬🇧 English-only roles" : "🌍 All language roles"}`);
+
       const r = await fetch(`${BACKEND_URL}/agent/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           profile: parsedProfile,
           state: agentState || {},
-          sources: ["arbeitnow","remotive","weworkremotely","themuse","adzuna"],
+          preferences: prefs,
+          keywords,
+          sources: prefs.sources,
           adzuna_app_id: "e54fec0b",
           adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d",
         }),
@@ -686,6 +716,73 @@ Packer.toBuffer(doc).then(buf => {
                 <Btn onClick={() => parseProfile()} disabled={parsing || (!resumeFile && (!resumeRaw || resumeRaw.trim().length < 20))} color={C.accent}>
                   {parsing ? <><span className="spin">⟳</span> Parsing with AI…</> : "⚡ Parse Resume with AI"}
                 </Btn>
+
+                {/* Search Preferences */}
+                <div style={{ marginTop: 28, background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22 }}>
+                  <div style={{ fontFamily: "Outfit, sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 16 }}>🎯 Search Preferences</div>
+
+                  {/* Target Countries */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>TARGET COUNTRIES</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {["Netherlands", "Germany", "Sweden", "Denmark", "Belgium", "Austria", "Switzerland", "Remote/Worldwide"].map(c => {
+                        const active = prefs.countries.includes(c);
+                        return (
+                          <div key={c} onClick={() => setPrefs(p => ({ ...p, countries: active ? p.countries.filter(x => x !== c) : [...p.countries, c] }))}
+                            style={{ background: active ? C.accent + "25" : C.surface, border: `1px solid ${active ? C.accent : C.border}`, borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13, color: active ? C.accent : C.muted, fontWeight: active ? 600 : 400, transition: "all .15s" }}>
+                            {c}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Job Type */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>JOB TYPE</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[["any", "Any"], ["onsite", "On-site"], ["hybrid", "Hybrid"], ["remote", "Remote"]].map(([val, label]) => (
+                        <div key={val} onClick={() => setPrefs(p => ({ ...p, jobType: val }))}
+                          style={{ background: prefs.jobType === val ? C.purple + "25" : C.surface, border: `1px solid ${prefs.jobType === val ? C.purple : C.border}`, borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13, color: prefs.jobType === val ? C.purple : C.muted, fontWeight: prefs.jobType === val ? 600 : 400 }}>
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Toggles */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                    {[
+                      ["englishOnly", "English-only roles", "🇬🇧"],
+                      ["visaSponsorship", "Visa sponsorship required", "✈️"],
+                    ].map(([key, label, icon]) => (
+                      <div key={key} onClick={() => setPrefs(p => ({ ...p, [key]: !p[key] }))}
+                        style={{ background: prefs[key] ? C.green + "12" : C.surface, border: `1px solid ${prefs[key] ? C.green + "50" : C.border}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 20, height: 20, borderRadius: 5, background: prefs[key] ? C.green : "transparent", border: `2px solid ${prefs[key] ? C.green : C.muted}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff", flexShrink: 0 }}>
+                          {prefs[key] ? "✓" : ""}
+                        </div>
+                        <span style={{ fontSize: 13, color: prefs[key] ? C.text : C.muted }}>{icon} {label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Min Salary */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>MINIMUM SALARY (€/year, optional)</div>
+                    <input value={prefs.salaryMin} onChange={e => setPrefs(p => ({ ...p, salaryMin: e.target.value }))}
+                      placeholder="e.g. 60000"
+                      style={{ width: 200, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }} />
+                  </div>
+
+                  {/* Custom keywords */}
+                  <div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>ADDITIONAL KEYWORDS (optional)</div>
+                    <input value={prefs.customKeywords} onChange={e => setPrefs(p => ({ ...p, customKeywords: e.target.value }))}
+                      placeholder="e.g. Cloudera, CDP, data platform, remote-friendly"
+                      style={{ width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }} />
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 5 }}>These are added to the search keywords automatically</div>
+                  </div>
+                </div>
 
                 {parsedProfile && (
                   <div className="fade" style={{ marginTop: 20, background: C.card, border: `1px solid ${C.green}40`, borderRadius: 12, padding: 20 }}>
