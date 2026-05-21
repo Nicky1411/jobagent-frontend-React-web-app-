@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "https://web-production-a6653.up.railway.app";
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA (generic — shown before live search) ───────
@@ -1090,10 +1090,6 @@ Packer.toBuffer(doc).then(buf => {
           </div>
         </div>
       </div>
-</div>
-    </div>
-    </div>
-    </div>
     </>
   );
 }
