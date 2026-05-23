@@ -106,7 +106,7 @@ const DiffViewer = ({ original, tailored }) => (
 );
 
 // ── MAIN APP ─────────────────────────────────────────────
-const TABS = ["Profile", "Jobs", "Agent", "Pipeline", "Tracker"];
+const TABS = ["Profile", "Jobs", "Agent", "Custom Job", "Pipeline", "Tracker"];
 
 export default function App() {
   const [tab, setTab] = useState("Profile");
@@ -125,7 +125,7 @@ export default function App() {
     englishOnly: true,
     visaSponsorship: true,
     customKeywords: "",
-    sources: ["arbeitnow", "remotive", "weworkremotely", "themuse", "adzuna"],
+    sources: ["arbeitnow", "remotive", "weworkremotely", "themuse", "adzuna", "naukri", "iimjobs", "instahyre"],
   });
 
   // Jobs
@@ -144,6 +144,10 @@ export default function App() {
   // Tracker
   const [applications, setApplications] = useState({});
   const [agentState, setAgentState] = useState(null); // persisted agent state
+  const [customJob, setCustomJob] = useState({ title: "", company: "", location: "", url: "", description: "" });
+  const [customPipeline, setCustomPipeline] = useState(null); // { resume, coverLetter, status }
+  const [customRunning, setCustomRunning] = useState(false);
+  const [customError, setCustomError] = useState("");
   const [agentRunning, setAgentRunning] = useState(false);
   const [agentResult, setAgentResult] = useState(null);
   const [agentLog, setAgentLog] = useState([]);
@@ -622,6 +626,45 @@ Packer.toBuffer(doc).then(buf => {
     setAgentResult(prev => ({ ...prev, pending_approval: (prev.pending_approval || []).filter(p => p.job_id !== jobId) }));
   };
 
+  // ── Custom Job Pipeline ───────────────────────────
+  const runCustomPipeline = async () => {
+    if (!parsedProfile) { alert("Please parse your resume first in the Profile tab."); return; }
+    if (!customJob.description && !customJob.url) { setCustomError("Please paste a job description or URL."); return; }
+    setCustomRunning(true);
+    setCustomError("");
+    setCustomPipeline({ status: "running", resume: "", coverLetter: "" });
+    try {
+      // If URL provided, try to fetch description via backend
+      let jobToUse = { ...customJob };
+      if (!jobToUse.description && jobToUse.url) {
+        try {
+          const rd = await fetch(`${BACKEND_URL}/fetch-job`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: jobToUse.url }),
+          });
+          const dd = await rd.json();
+          if (dd.description) jobToUse.description = dd.description;
+          if (dd.title && !jobToUse.title) jobToUse.title = dd.title;
+          if (dd.company && !jobToUse.company) jobToUse.company = dd.company;
+        } catch { /* URL fetch failed, use what we have */ }
+      }
+
+      // Step 1: Rewrite resume
+      const resumeRes = await backendCall("generate", { type: "resume", job: jobToUse, profile: parsedProfile });
+      setCustomPipeline(p => ({ ...p, resume: resumeRes.content }));
+
+      // Step 2: Generate cover letter
+      const coverRes = await backendCall("generate", { type: "cover", job: jobToUse, profile: parsedProfile });
+      setCustomPipeline(p => ({ ...p, coverLetter: coverRes.content, status: "done" }));
+
+    } catch (e) {
+      setCustomError(e.message);
+      setCustomPipeline(p => ({ ...p, status: "error" }));
+    }
+    setCustomRunning(false);
+  };
+
   const PIPE_STEPS = ["Rewrite Resume", "Cover Letter", "Build DOCX", "Apply"];
 
   return (
@@ -725,7 +768,7 @@ Packer.toBuffer(doc).then(buf => {
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>TARGET COUNTRIES</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {["Netherlands", "Germany", "Sweden", "Denmark", "Belgium", "Austria", "Switzerland", "Remote/Worldwide"].map(c => {
+                      {["Netherlands", "Germany", "Sweden", "Denmark", "Belgium", "Austria", "Switzerland", "Remote/Worldwide", "India", "Singapore"].map(c => {
                         const active = prefs.countries.includes(c);
                         return (
                           <div key={c} onClick={() => setPrefs(p => ({ ...p, countries: active ? p.countries.filter(x => x !== c) : [...p.countries, c] }))}
@@ -1130,6 +1173,171 @@ Packer.toBuffer(doc).then(buf => {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── CUSTOM JOB TAB ── */}
+            {tab === "Custom Job" && (
+              <div className="fade" style={{ maxWidth: 800 }}>
+                <h2 style={{ fontWeight: 800, fontSize: 22, marginBottom: 4 }}>🎯 Custom Job</h2>
+                <p style={{ color: C.muted, fontSize: 13, marginBottom: 24, lineHeight: 1.7 }}>
+                  Found a job on LinkedIn, a company website, or anywhere else? Paste it here — the agent will instantly rewrite your resume and generate a cover letter tailored to it.
+                </p>
+
+                {/* Job details form */}
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Job Details</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                    {[
+                      ["Job Title", "title", "e.g. Senior Strategy Consultant"],
+                      ["Company", "company", "e.g. McKinsey & Company"],
+                      ["Location", "location", "e.g. Munich, Germany"],
+                      ["Job URL", "url", "e.g. https://linkedin.com/jobs/..."],
+                    ].map(([label, key, placeholder]) => (
+                      <div key={key}>
+                        <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontWeight: 600 }}>{label.toUpperCase()}</div>
+                        <input
+                          value={customJob[key]}
+                          onChange={e => setCustomJob(p => ({ ...p, [key]: e.target.value }))}
+                          placeholder={placeholder}
+                          style={{ width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", color: C.text, fontSize: 13 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Job description */}
+                  <div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontWeight: 600, display: "flex", justifyContent: "space-between" }}>
+                      <span>JOB DESCRIPTION <span style={{ color: C.accent }}>*</span></span>
+                      <span style={{ color: customJob.description.length > 100 ? C.green : C.muted }}>{customJob.description.length} chars</span>
+                    </div>
+                    <textarea
+                      value={customJob.description}
+                      onChange={e => { setCustomJob(p => ({ ...p, description: e.target.value })); setCustomError(""); }}
+                      rows={10}
+                      placeholder="Paste the full job description here...&#10;&#10;Tip: Copy everything — responsibilities, requirements, about the company. More detail = better tailoring."
+                      style={{ width: "100%", background: C.surface, border: `1px solid ${customJob.description.length > 100 ? C.green+"60" : C.border}`, borderRadius: 10, padding: "12px 14px", color: C.text, fontSize: 13, resize: "vertical", lineHeight: 1.7 }}
+                    />
+                  </div>
+                </div>
+
+                {/* Tips */}
+                <div style={{ background: C.accent+"10", border: `1px solid ${C.accent}25`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: C.accent }}>💡 How to use with LinkedIn</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {[
+                      ["1. Find a job on LinkedIn", "Search for roles → open any job posting"],
+                      ["2. Copy the description", "Click 'See more' → Select All → Copy"],
+                      ["3. Paste here", "Paste in the box above + add title/company"],
+                      ["4. Run pipeline", "Get tailored resume + cover letter instantly"],
+                    ].map(([step, desc]) => (
+                      <div key={step} style={{ display: "flex", gap: 8 }}>
+                        <span style={{ color: C.accent, fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{step}:</span>
+                        <span style={{ fontSize: 12, color: C.muted }}>{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {customError && (
+                  <div style={{ background: C.red+"15", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: C.red }}>
+                    ❌ {customError}
+                  </div>
+                )}
+
+                <Btn
+                  onClick={runCustomPipeline}
+                  disabled={customRunning || !parsedProfile || (!customJob.description && !customJob.url)}
+                  color={C.green}
+                  style={{ padding: "12px 32px", fontSize: 15, marginBottom: 28 }}
+                >
+                  {customRunning ? <><span className="spin">⟳</span> Running Pipeline…</> : "⚡ Run Pipeline on This Job"}
+                </Btn>
+
+                {/* Results */}
+                {customPipeline && (
+                  <div className="fade">
+                    {/* Status bar */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center" }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>Results</div>
+                      {customPipeline.status === "running" && <Badge label="⟳ Generating…" color={C.accent} />}
+                      {customPipeline.status === "done" && <Badge label="✓ Ready" color={C.green} />}
+                      {customPipeline.status === "error" && <Badge label="✗ Error" color={C.red} />}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      {/* Tailored Resume */}
+                      <div>
+                        <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>📄 TAILORED RESUME</span>
+                          {customPipeline.resume && (
+                            <Btn onClick={() => navigator.clipboard.writeText(customPipeline.resume)} outline color={C.accent} small>📋 Copy</Btn>
+                          )}
+                        </div>
+                        <textarea
+                          value={customPipeline.resume || (customRunning ? "✍️ Rewriting resume for this specific role…" : "")}
+                          onChange={e => setCustomPipeline(p => ({ ...p, resume: e.target.value }))}
+                          readOnly={!customPipeline.resume}
+                          style={{ width: "100%", height: 340, background: C.surface, border: `1px solid ${customPipeline.resume ? C.green+"50" : C.border}`, borderRadius: 10, padding: 14, color: C.text, fontSize: 12, resize: "vertical", fontFamily: "Fira Code, monospace", lineHeight: 1.8 }}
+                        />
+                      </div>
+
+                      {/* Cover Letter */}
+                      <div>
+                        <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>✉️ COVER LETTER</span>
+                          {customPipeline.coverLetter && (
+                            <Btn onClick={() => navigator.clipboard.writeText(customPipeline.coverLetter)} outline color={C.purple} small>📋 Copy</Btn>
+                          )}
+                        </div>
+                        <textarea
+                          value={customPipeline.coverLetter || (customRunning && customPipeline.resume ? "✍️ Writing cover letter…" : "")}
+                          onChange={e => setCustomPipeline(p => ({ ...p, coverLetter: e.target.value }))}
+                          readOnly={!customPipeline.coverLetter}
+                          style={{ width: "100%", height: 340, background: C.surface, border: `1px solid ${customPipeline.coverLetter ? C.purple+"50" : C.border}`, borderRadius: 10, padding: 14, color: C.text, fontSize: 12, resize: "vertical", fontFamily: "Fira Code, monospace", lineHeight: 1.8 }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    {customPipeline.status === "done" && (
+                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                        <Btn onClick={() => {
+                          const blob = new Blob([customPipeline.resume], { type: "text/plain" });
+                          const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+                          a.download = "Resume_" + (customJob.company || "Custom").replace(/\s/g,"_") + ".txt";
+                          a.click();
+                        }} color={C.green}>⬇️ Download Resume</Btn>
+                        <Btn onClick={() => {
+                          const blob = new Blob([customPipeline.coverLetter], { type: "text/plain" });
+                          const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+                          a.download = "CoverLetter_" + (customJob.company || "Custom").replace(/\s/g,"_") + ".txt";
+                          a.click();
+                        }} color={C.purple}>⬇️ Download Cover Letter</Btn>
+                        {customJob.url && (
+                          <Btn onClick={() => window.open(customJob.url, "_blank")} outline color={C.accent}>🔗 Open Job</Btn>
+                        )}
+                        <Btn onClick={() => {
+                          setApplications(p => ({
+                            ...p,
+                            ["custom_" + Date.now()]: {
+                              id: "custom_" + Date.now(),
+                              title: customJob.title || "Custom Job",
+                              company: customJob.company || "Unknown",
+                              location: customJob.location || "",
+                              match: 85,
+                              appliedAt: new Date().toLocaleDateString(),
+                              method: "Manual",
+                              status: "Applied",
+                            }
+                          }));
+                          alert("Marked as applied! Check Tracker tab.");
+                        }} outline color={C.green}>✓ Mark as Applied</Btn>
                       </div>
                     )}
                   </div>
