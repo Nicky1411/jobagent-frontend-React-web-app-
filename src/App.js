@@ -2,6 +2,45 @@ import { useState, useRef, useEffect, useCallback } from "react";
 
 // ── CONFIG ───────────────────────────────────────────────
 const BACKEND_URL = "https://web-production-a6653.up.railway.app";
+
+// Geography → Job Board mapping
+// Each country activates specific job boards automatically
+const GEOGRAPHY_BOARDS = {
+  "Netherlands":       ["arbeitnow", "remotive", "themuse", "adzuna"],
+  "Germany":           ["stepstone", "arbeitnow", "themuse", "adzuna"],
+  "Sweden":            ["arbeitnow", "remotive", "themuse", "adzuna"],
+  "Denmark":           ["arbeitnow", "remotive", "adzuna"],
+  "Belgium":           ["arbeitnow", "remotive", "adzuna"],
+  "Austria":           ["stepstone", "arbeitnow", "adzuna"],
+  "Switzerland":       ["stepstone", "arbeitnow", "adzuna"],
+  "UK":                ["remotive", "themuse", "weworkremotely", "adzuna"],
+  "India":             ["naukri", "iimjobs", "instahyre", "adzuna"],
+  "Singapore":         ["remotive", "themuse", "adzuna"],
+  "Remote/Worldwide":  ["remotive", "weworkremotely", "themuse", "arbeitnow"],
+};
+
+// Adzuna country codes
+const ADZUNA_COUNTRIES = {
+  "Netherlands": "nl", "Germany": "de", "Sweden": "se",
+  "Denmark": "dk", "Belgium": "be", "Austria": "at",
+  "Switzerland": "ch", "UK": "gb", "India": "in", "Singapore": "sg",
+};
+
+// Derive active sources from selected countries
+const getActiveSources = (countries) => {
+  const sources = new Set();
+  countries.forEach(country => {
+    (GEOGRAPHY_BOARDS[country] || []).forEach(s => sources.add(s));
+  });
+  return [...sources];
+};
+
+// Get Adzuna country codes from selected countries
+const getAdzunaCountries = (countries) => {
+  return countries
+    .filter(c => ADZUNA_COUNTRIES[c])
+    .map(c => ADZUNA_COUNTRIES[c]);
+};
 const AUTO_APPLY_THRESHOLD = 85; // auto-apply if match >= this
 
 // ── DEMO DATA (generic — shown before live search) ───────
@@ -125,8 +164,8 @@ export default function App() {
     englishOnly: true,
     visaSponsorship: true,
     customKeywords: "",
-    sources: ["arbeitnow", "remotive", "weworkremotely", "themuse", "adzuna", "naukri", "iimjobs", "instahyre"],
   });
+  // Sources are always derived from selected countries - no manual selection needed
 
   // Jobs
   const [jobs, setJobs] = useState(DEMO_JOBS);
@@ -224,7 +263,8 @@ export default function App() {
               keywords: searchKeywords + (prefs.customKeywords ? " " + prefs.customKeywords : ""),
               profile: parsedProfile || {},
               preferences: prefs,
-              sources: prefs.sources,
+              sources: getActiveSources(prefs.countries),
+              adzuna_countries: getAdzunaCountries(prefs.countries),
               adzuna_app_id: "e54fec0b",
               adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d"
             }),
@@ -576,10 +616,15 @@ Packer.toBuffer(doc).then(buf => {
     try {
       // Build keywords from profile + preferences
       const profileTitle = parsedProfile.title?.toLowerCase() || "";
-      const topSkills = parsedProfile.skills?.slice(0, 3).join(" ").toLowerCase() || "";
+      const topSkills = parsedProfile.skills?.slice(0, 2).join(" ").toLowerCase() || "";
       const customKw = prefs.customKeywords ? " " + prefs.customKeywords : "";
-      const locationKw = prefs.countries.filter(c => c !== "Remote/Worldwide").slice(0, 2).join(" OR ").toLowerCase();
-      const keywords = `${profileTitle} ${topSkills}${customKw} ${locationKw}`.trim();
+      // Keep keywords short - max 4 words from title + skills
+      const titleWords = profileTitle.split(" ").slice(0, 3).join(" ");
+      const keywords = `${titleWords} ${topSkills}${customKw}`.trim();
+
+      // Derive sources from selected countries automatically
+      const activeSources = getActiveSources(prefs.countries);
+      const adzunaCountries = getAdzunaCountries(prefs.countries);
 
       addLog(`🔑 Keywords: "${keywords}"`);
       addLog(`📍 Targets: ${prefs.countries.join(", ")}`);
@@ -594,9 +639,11 @@ Packer.toBuffer(doc).then(buf => {
           state: agentState || {},
           preferences: prefs,
           keywords,
-          sources: prefs.sources,
+          sources: activeSources,
           adzuna_app_id: "e54fec0b",
           adzuna_app_key: "3b1268098a6185accb5ac6e4d663c02d",
+          adzuna_countries: adzunaCountries,
+          target_countries: prefs.countries,
         }),
       });
       const data = await r.json();
@@ -815,6 +862,19 @@ Packer.toBuffer(doc).then(buf => {
                     <input value={prefs.salaryMin} onChange={e => setPrefs(p => ({ ...p, salaryMin: e.target.value }))}
                       placeholder="e.g. 60000"
                       style={{ width: 200, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }} />
+                  </div>
+
+                  {/* Active boards preview */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>ACTIVE JOB BOARDS (based on your country selection)</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {getActiveSources(prefs.countries).map(s => (
+                        <span key={s} style={{ background: C.accent+"18", border: `1px solid ${C.accent}33`, borderRadius: 6, padding: "3px 10px", fontSize: 11, color: C.accent, fontWeight: 500 }}>
+                          {s === "naukri" ? "Naukri 🇮🇳" : s === "iimjobs" ? "IIMJobs 🇮🇳" : s === "instahyre" ? "Instahyre 🇮🇳" : s === "stepstone" ? "Stepstone 🇩🇪" : s === "weworkremotely" ? "WeWorkRemotely" : s === "themuse" ? "The Muse" : s.charAt(0).toUpperCase() + s.slice(1)}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 5 }}>Selecting different countries changes which boards are searched</div>
                   </div>
 
                   {/* Custom keywords */}
