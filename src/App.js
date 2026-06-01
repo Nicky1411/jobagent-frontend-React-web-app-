@@ -164,6 +164,9 @@ export default function App() {
     englishOnly: true,
     visaSponsorship: true,
     customKeywords: "",
+    recipientEmail: "",       // her email for daily digest
+    scheduleEnabled: false,   // whether daily emails are on
+    scheduleTime: "08:00",    // preferred time (UTC)
   });
   // Sources are always derived from selected countries - no manual selection needed
 
@@ -183,6 +186,9 @@ export default function App() {
   // Tracker
   const [applications, setApplications] = useState({});
   const [agentState, setAgentState] = useState(null); // persisted agent state
+  const [scheduleSetup, setScheduleSetup] = useState(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState("");
   const [customJob, setCustomJob] = useState({ title: "", company: "", location: "", url: "", description: "" });
   const [customPipeline, setCustomPipeline] = useState(null); // { resume, coverLetter, status }
   const [customRunning, setCustomRunning] = useState(false);
@@ -241,6 +247,7 @@ export default function App() {
       const parsed = d.profile;
       if (!parsed || !parsed.name) throw new Error("Could not extract name — make sure resume starts with the candidate's full name");
       setParsedProfile(parsed);
+      if (parsed.email && !notifyEmail) setNotifyEmail(parsed.email);
       // Build smart keywords from any profile type
       const topSkills = parsed.skills?.slice(0, 3).join(" ").toLowerCase() || "";
       const cleanTitle = (parsed.title || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
@@ -665,6 +672,26 @@ Packer.toBuffer(doc).then(buf => {
     setAgentRunning(false);
   };
 
+  // ── Save Profile for Scheduler ───────────────────
+  const saveProfileForScheduler = async () => {
+    if (!parsedProfile) { alert("Parse resume first"); return; }
+    if (!prefs.recipientEmail) { alert("Please enter your email address in the Search Preferences section."); return; }
+    setSavingProfile(true);
+    try {
+      const d = await backendCall("profile/save", {
+        profile: parsedProfile,
+        recipient_email: prefs.recipientEmail,
+        schedule_time: prefs.scheduleTime,
+        target_countries: prefs.countries,
+      });
+      setScheduleSetup(d);
+      setPrefs(p => ({ ...p, scheduleEnabled: true }));
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+    setSavingProfile(false);
+  };
+
   const approveJob = async (jobId, approved) => {
     const job = agentResult?.state?.jobs?.[jobId];
     if (approved && job) {
@@ -878,12 +905,35 @@ Packer.toBuffer(doc).then(buf => {
                   </div>
 
                   {/* Custom keywords */}
-                  <div>
+                  <div style={{ marginBottom: 16 }}>
                     <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>ADDITIONAL KEYWORDS (optional)</div>
                     <input value={prefs.customKeywords} onChange={e => setPrefs(p => ({ ...p, customKeywords: e.target.value }))}
                       placeholder="e.g. Cloudera, CDP, data platform, remote-friendly"
                       style={{ width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }} />
                     <div style={{ fontSize: 11, color: C.muted, marginTop: 5 }}>These are added to the search keywords automatically</div>
+                  </div>
+
+                  {/* Daily email setup */}
+                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, fontWeight: 600 }}>📧 DAILY EMAIL DIGEST</div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+                      <input
+                        value={prefs.recipientEmail}
+                        onChange={e => setPrefs(p => ({ ...p, recipientEmail: e.target.value }))}
+                        placeholder="Enter email address for daily digest"
+                        type="email"
+                        style={{ flex: 1, minWidth: 220, background: C.surface, border: `1px solid ${prefs.recipientEmail ? C.green+"60" : C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }}
+                      />
+                      <select value={prefs.scheduleTime} onChange={e => setPrefs(p => ({ ...p, scheduleTime: e.target.value }))}
+                        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13 }}>
+                        {["06:00","07:00","08:00","09:00","10:00"].map(t => (
+                          <option key={t} value={t}>{t} UTC</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+                      Every morning at the selected time, the agent runs automatically and emails the top job matches with tailored resumes attached.
+                    </div>
                   </div>
                 </div>
 
@@ -900,9 +950,52 @@ Packer.toBuffer(doc).then(buf => {
                       <div>{parsedProfile.skills?.map(s => <Tag key={s} label={s} color={C.accent} />)}</div>
                     </div>
                     <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.8 }}>{parsedProfile.summary}</div>
-                    <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+                    <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <Btn onClick={() => setTab("Jobs")} color={C.green}>View Matched Jobs →</Btn>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          value={notifyEmail}
+                          onChange={e => setNotifyEmail(e.target.value)}
+                          placeholder="Email for daily digest"
+                          type="email"
+                          style={{ background: C.surface, border: `1px solid ${notifyEmail ? C.green+"60" : C.border}`, borderRadius: 8, padding: "8px 12px", color: C.text, fontSize: 13, width: 220 }}
+                        />
+                        <Btn onClick={saveProfileForScheduler} disabled={savingProfile || !notifyEmail} outline color={C.accent}>
+                          {savingProfile ? "⟳ Saving…" : "📧 Enable Daily Email"}
+                        </Btn>
+                      </div>
                     </div>
+
+                    {scheduleSetup && (
+                      <div className="fade" style={{ marginTop: 16, background: C.accent+"10", border: `1px solid ${C.accent}30`, borderRadius: 12, padding: 16 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: C.accent, marginBottom: 10 }}>📅 Set Up Daily Email Digest</div>
+                        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.8, marginBottom: 12 }}>
+                          To receive daily job matches + tailored resumes every morning at 8 AM, complete these steps:
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {[
+                            ["1", "Sign up free at sendgrid.com → get API key"],
+                            ["2", "Go to Railway → your service → Variables → add:"],
+                            ["3", "SENDGRID_API_KEY = your SendGrid key"],
+                            ["4", "RECIPIENT_EMAIL = " + (notifyEmail || parsedProfile?.email || "enter email above")],
+                            ["5", "SENDER_EMAIL = your verified sender email"],
+                            ["6", "TARGET_COUNTRIES = " + prefs.countries.join(",")],
+                            ["7", "STORED_PROFILE = (copy the JSON below)"],
+                            ["8", "Railway → Settings → Cron → add: 0 8 * * *"],
+                          ].map(([num, text]) => (
+                            <div key={num} style={{ display: "flex", gap: 8, fontSize: 12 }}>
+                              <span style={{ background: C.accent, color: "#fff", borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{num}</span>
+                              <span style={{ color: C.text }}>{text}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>STORED_PROFILE JSON (copy this):</div>
+                          <textarea readOnly value={scheduleSetup.profile_json || ""} style={{ width: "100%", height: 80, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, color: C.accent, fontSize: 11, resize: "none", fontFamily: "Fira Code, monospace" }} />
+                          <Btn onClick={() => navigator.clipboard.writeText(scheduleSetup.profile_json || "")} outline color={C.accent} small style={{ marginTop: 6 }}>📋 Copy JSON</Btn>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
